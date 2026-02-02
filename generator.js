@@ -277,12 +277,23 @@ var FloorplanGenerator = {
         var dist = Math.sqrt(vToCenter.x * vToCenter.x + vToCenter.y * vToCenter.y);
         if (dist < 1) return points;
 
-        // Сдвигаем внутрь на 40–70% пути к центру (гарантирует смещение по X и Y)
-        var scale = this.utils.randomFloat(0.4, 0.7);
-        var notch = {
-            x: mid.x + vToCenter.x * scale,
-            y: mid.y + vToCenter.y * scale
+        // Двигаемся В ПРОТИВОПОЛОЖНУЮ сторону от центра, чтобы получить вогнутый «надрез» наружу
+        var vOut = { x: -vToCenter.x, y: -vToCenter.y };
+
+        // 45/30/60-esque диагональ: требуем ощутимые проекции по обеим осям
+        var scale = this.utils.randomFloat(0.4, 0.8); // длина шага по вектору наружу
+        var rawNotch = {
+            x: mid.x + vOut.x * scale,
+            y: mid.y + vOut.y * scale
         };
+
+        // Гарантируем, что смещение имеет компоненты по X и Y (не почти вертикаль/горизонталь)
+        var dx = rawNotch.x - mid.x;
+        var dy = rawNotch.y - mid.y;
+        var minDiag = gridSnap * 0.5; // ~полклетки
+        if (Math.abs(dx) < minDiag) dx = (dx >= 0 ? 1 : -1) * minDiag;
+        if (Math.abs(dy) < minDiag) dy = (dy >= 0 ? 1 : -1) * minDiag;
+        var notch = { x: mid.x + dx, y: mid.y + dy };
 
         notch.x = this.utils.snapToGrid(notch.x, gridSnap);
         notch.y = this.utils.snapToGrid(notch.y, gridSnap);
