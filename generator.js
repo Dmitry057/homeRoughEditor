@@ -36,7 +36,8 @@ var FloorplanGenerator = {
         doorSize: 60,
         windowSizeSmall: 60,
         windowSizeLarge: 100,
-        gridSnap: 30
+        gridSnap: 30,
+        concaveChance: 0.2
     },
 
     // Хранение информации о внешних стенах
@@ -137,9 +138,10 @@ var FloorplanGenerator = {
      * Генерация формы здания (не прямоугольник!)
      * Возвращает массив точек полигона
      */
-    generateBuildingShape: function(baseWidth, baseHeight, shapeType) {
+    generateBuildingShape: function(baseWidth, baseHeight, shapeType, concaveChance) {
         var points = [];
         var x = 200, y = 200;
+        concaveChance = concaveChance || 0;
 
         // Случайный выбор формы если не указан
         if (!shapeType) {
@@ -242,7 +244,58 @@ var FloorplanGenerator = {
             points[i].y = this.utils.snapToGrid(points[i].y, this.defaults.gridSnap);
         }
 
+        // Опционально добавляем вогнутый диагональный надрез внутрь формы
+        if (Math.random() < concaveChance) {
+            points = this.addConcaveNotch(points, this.defaults.gridSnap);
+        }
+
         return points;
+    },
+
+    /**
+     * Добавляет одну диагональную грань, смещённую к центру масс полигона.
+     */
+    addConcaveNotch: function(points, gridSnap) {
+        if (points.length < 4) return points;
+
+        // Центр масс (среднее координат вершин)
+        var cx = 0, cy = 0;
+        for (var i = 0; i < points.length; i++) {
+            cx += points[i].x;
+            cy += points[i].y;
+        }
+        cx /= points.length;
+        cy /= points.length;
+
+        // Выбираем случайное ребро
+        var edgeIndex = this.utils.random(0, points.length - 1);
+        var p1 = points[edgeIndex];
+        var p2 = points[(edgeIndex + 1) % points.length];
+
+        var mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        var vToCenter = { x: cx - mid.x, y: cy - mid.y };
+        var dist = Math.sqrt(vToCenter.x * vToCenter.x + vToCenter.y * vToCenter.y);
+        if (dist < 1) return points;
+
+        // Сдвигаем внутрь на 40–70% пути к центру (гарантирует смещение по X и Y)
+        var scale = this.utils.randomFloat(0.4, 0.7);
+        var notch = {
+            x: mid.x + vToCenter.x * scale,
+            y: mid.y + vToCenter.y * scale
+        };
+
+        notch.x = this.utils.snapToGrid(notch.x, gridSnap);
+        notch.y = this.utils.snapToGrid(notch.y, gridSnap);
+
+        // Вставляем новую точку между p1 и p2
+        var newPoints = [];
+        for (var i = 0; i < points.length; i++) {
+            newPoints.push(points[i]);
+            if (i === edgeIndex) {
+                newPoints.push(notch);
+            }
+        }
+        return newPoints;
     },
 
     /**
@@ -1110,6 +1163,7 @@ var FloorplanGenerator = {
         var addEnergy = config.addEnergy !== false;
         var animateSteps = config.animateSteps === true;
         var stepDelay = config.stepDelayMs || 100;
+        var concaveChance = (config.concaveChance !== undefined) ? config.concaveChance : this.defaults.concaveChance;
 
         console.log('=== GENERATOR DEBUG ===');
 
@@ -1117,7 +1171,7 @@ var FloorplanGenerator = {
         this.clearFloorplan();
 
         // 2. Генерация формы здания
-        var shape = this.generateBuildingShape(width, height, shapeType);
+        var shape = this.generateBuildingShape(width, height, shapeType, concaveChance);
         console.log('Shape points:', shape.length);
 
         // 3. Создание внешних стен (несущие)
