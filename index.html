@@ -71,6 +71,14 @@
         <stop offset="0%" stop-color="#dbc6a0" stop-opacity="1" />
         <stop offset="100%" stop-color="#c69d56" stop-opacity="1" />
       </linearGradient>
+      <linearGradient id="gradientCyan" x1="0%" y1="0%" x2="100%" y2="100%" spreadMethod="pad">
+        <stop offset="0%" stop-color="#77e1f4" stop-opacity="1" />
+        <stop offset="100%" stop-color="#00bcd4" stop-opacity="1" />
+      </linearGradient>
+      <linearGradient id="gradientGray" x1="0%" y1="0%" x2="100%" y2="100%" spreadMethod="pad">
+        <stop offset="0%" stop-color="#9e9e9e" stop-opacity="1" />
+        <stop offset="100%" stop-color="#757575" stop-opacity="1" />
+      </linearGradient>
 
       <pattern id="grass" patternUnits="userSpaceOnUse" width="256" height="256">
         <image
@@ -438,6 +446,41 @@
       <!-- <li><button class="btn btn-light shadow fully " id="object_mode" onclick="$('.sub').hide();$('#object_list').toggle(200);">FURNITURE</button></li> -->
       <br />
 
+      <!-- Generator Panel -->
+      <div id="generator_list" class="list-unstyled sub"
+        style="box-shadow:2px 2px 3px #ccc;display:none;background:#fff;border-radius: 0 5px 5px 0; padding:15px;position:absolute;left:200px;bottom:100px;width:340px">
+        <p style="font-weight:bold;margin-bottom:10px">Procedural Generator v2</p>
+        <div style="margin-bottom:10px">
+          <label>Size (m):</label>
+          <input type="number" id="gen_width" value="14" min="8" max="30" style="width:50px"> x
+          <input type="number" id="gen_height" value="10" min="6" max="20" style="width:50px">
+        </div>
+        <div style="margin-bottom:10px">
+          <label>Shape:</label>
+          <select id="gen_shape" style="width:120px">
+            <option value="">Random</option>
+            <option value="L">L-shape</option>
+            <option value="T">T-shape</option>
+            <option value="U">U-shape</option>
+            <option value="angled">Angled corner</option>
+            <option value="irregular">Irregular</option>
+            <option value="rect">Rectangle</option>
+          </select>
+        </div>
+        <div style="margin-bottom:10px">
+          <label>Windows:</label>
+          <input type="number" id="gen_windows" value="6" min="2" max="12" style="width:50px">
+          <label style="margin-left:10px"><input type="checkbox" id="gen_energy" checked> Energy</label>
+        </div>
+        <div style="margin-top:15px">
+          <button class="btn btn-primary" onclick="runGenerator()">Generate</button>
+          <button class="btn btn-outline-secondary" onclick="runGenerator()">Again</button>
+        </div>
+      </div>
+      <li><button class="btn btn-success shadow fully" id="generator_mode"
+          onclick="$('.sub').hide();$('#generator_list').toggle(200);"><i class="fa fa-magic"></i> GENERATE</button></li>
+      <br />
+
       <li><button class="btn btn-light shadow fully " id="layer_mode"
           onclick="$('.sub').hide();$('#layer_list').toggle(200);">Layers</button></li>
 
@@ -618,5 +661,25 @@
 <script src="qSVG.js"></script>
 <script src="editor.js"></script>
 <script src="engine.js"></script>
+<script src="generator.js"></script>
+<script>
+// Generator UI wrapper
+function runGenerator() {
+    var shapeSelect = document.getElementById('gen_shape');
+    var shape = shapeSelect.value || null;
+
+    var config = {
+        width: parseInt(document.getElementById('gen_width').value) * 60,
+        height: parseInt(document.getElementById('gen_height').value) * 60,
+        shapeType: shape,
+        windowCount: parseInt(document.getElementById('gen_windows').value),
+        addEnergy: document.getElementById('gen_energy').checked
+    };
+
+    var result = FloorplanGenerator.generate(config);
+    var shapeUsed = result.shape || 'random';
+    $('#boxinfo').html('Generated: ' + shapeUsed + ' shape, ' + result.wallCount + ' walls, ' + result.objectCount + ' objects');
+}
+</script>
 
 </html>

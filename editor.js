@@ -276,6 +276,8 @@ var editor = {
     $('#boxRoom').empty();
     $('#boxSurface').empty();
     editor.roomMaker(Rooms);
+    // Обновляем масштаб текста после перестройки
+    if (typeof updateTextScale === 'function') updateTextScale();
     return true;
   },
 

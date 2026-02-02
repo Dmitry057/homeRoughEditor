@@ -1091,6 +1091,43 @@ function zoom_maker(lens, xmove, xview) {
     });
 }
 
+// Масштабирование текста при зуме
+function updateTextScale() {
+    var scale = width_viewbox / taille_w;
+    var textScale = Math.max(1, scale);
+
+    // Масштабируем текст площадей и названий комнат (SVG text)
+    $('#boxArea text').each(function() {
+        var baseSize = parseFloat($(this).attr('data-base-size'));
+        if (!baseSize) {
+            baseSize = parseFloat($(this).attr('font-size')) || parseFloat($(this).css('font-size')) || 18;
+            $(this).attr('data-base-size', baseSize);
+        }
+        $(this).attr('font-size', (baseSize * textScale) + 'px');
+        $(this).css('font-size', (baseSize * textScale) + 'px');
+    });
+
+    // Масштабируем размеры на стенах
+    $('#boxRib text').each(function() {
+        var baseSize = parseFloat($(this).attr('data-base-size'));
+        if (!baseSize) {
+            baseSize = parseFloat($(this).attr('font-size')) || 12;
+            $(this).attr('data-base-size', baseSize);
+        }
+        $(this).attr('font-size', (baseSize * textScale * 0.8) + 'px');
+    });
+
+    // Масштабируем размеры на шкале
+    $('#boxScale text').each(function() {
+        var baseSize = parseFloat($(this).attr('data-base-size'));
+        if (!baseSize) {
+            baseSize = 14;
+            $(this).attr('data-base-size', baseSize);
+        }
+        $(this).attr('font-size', (baseSize * textScale) + 'px');
+    });
+}
+
 tactile = false;
 
 function calcul_snap(event, state) {
