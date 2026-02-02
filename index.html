@@ -472,6 +472,10 @@
           <input type="number" id="gen_windows" value="6" min="2" max="12" style="width:50px">
           <label style="margin-left:10px"><input type="checkbox" id="gen_energy" checked> Energy</label>
         </div>
+        <div style="margin-bottom:10px">
+          <label><input type="checkbox" id="gen_animate"> Animate steps</label>
+          <input type="number" id="gen_delay" value="100" min="20" max="1000" step="20" style="width:70px;margin-left:10px"> ms
+        </div>
         <div style="margin-top:15px">
           <button class="btn btn-primary" onclick="runGenerator()">Generate</button>
           <button class="btn btn-outline-secondary" onclick="runGenerator()">Again</button>
@@ -673,7 +677,9 @@ function runGenerator() {
         height: parseInt(document.getElementById('gen_height').value) * 60,
         shapeType: shape,
         windowCount: parseInt(document.getElementById('gen_windows').value),
-        addEnergy: document.getElementById('gen_energy').checked
+        addEnergy: document.getElementById('gen_energy').checked,
+        animateSteps: document.getElementById('gen_animate').checked,
+        stepDelayMs: parseInt(document.getElementById('gen_delay').value) || 100
     };
 
     var result = FloorplanGenerator.generate(config);

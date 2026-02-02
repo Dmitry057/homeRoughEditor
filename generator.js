@@ -1108,6 +1108,8 @@ var FloorplanGenerator = {
         var shapeType = config.shapeType || null; // null = случайный
         var windowCount = config.windowCount || 6;
         var addEnergy = config.addEnergy !== false;
+        var animateSteps = config.animateSteps === true;
+        var stepDelay = config.stepDelayMs || 100;
 
         console.log('=== GENERATOR DEBUG ===');
 
@@ -1174,6 +1176,11 @@ var FloorplanGenerator = {
         // 12. Сохранение
         save();
 
+        // 13. Пошаговая анимация появления элементов
+        if (animateSteps) {
+            this.animateSpawn(stepDelay);
+        }
+
         console.log('=== FINAL: OBJDATA=' + OBJDATA.length + ' ===');
 
         return {
@@ -1183,6 +1190,45 @@ var FloorplanGenerator = {
             innerWalls: this.innerWalls.length,
             objectCount: OBJDATA.length
         };
+    },
+
+    /**
+     * Плавное поочерёдное появление всех сгенерированных элементов
+     * delayMs — задержка между объектами
+     */
+    animateSpawn: function(delayMs) {
+        delayMs = delayMs || 100;
+        var selectors = [
+            '#boxwall > *',
+            '#boxRoom > *',
+            '#boxSurface > *',
+            '#boxcarpentry > *',
+            '#boxEnergy > *',
+            '#boxFurniture > *',
+            '#boxArea > *',
+            '#boxDebug > *'
+        ];
+
+        var nodes = [];
+        selectors.forEach(function(sel) {
+            nodes = nodes.concat($(sel).toArray());
+        });
+
+        nodes.forEach(function(node) {
+            var $n = $(node);
+            $n.css('opacity', 0);
+            // если уже есть transition, не затираем
+            var existing = $n.css('transition');
+            if (!existing || existing === 'all 0s ease 0s') {
+                $n.css('transition', 'opacity 0.08s ease-out');
+            }
+        });
+
+        nodes.forEach(function(node, idx) {
+            setTimeout(function() {
+                $(node).css('opacity', 1);
+            }, delayMs * idx);
+        });
     }
 };
 
