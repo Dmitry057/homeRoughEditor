@@ -274,7 +274,10 @@ function save(boot = false) {
             WALLS[k].parent = WALLS.indexOf(WALLS[k].parent);
         }
     }
-    if (JSON.stringify({ objData: OBJDATA, wallData: WALLS, roomData: ROOM }) === HISTORY[HISTORY.length - 1]) {
+    // Serialize curved walls
+    var curvedWallsData = typeof serializeCurvedWalls === 'function' ? serializeCurvedWalls() : [];
+
+    if (JSON.stringify({ objData: OBJDATA, wallData: WALLS, roomData: ROOM, curvedWallData: curvedWallsData }) === HISTORY[HISTORY.length - 1]) {
         for (let k in WALLS) {
             if (WALLS[k].child != null) {
                 WALLS[k].child = WALLS[WALLS[k].child];
@@ -290,7 +293,7 @@ function save(boot = false) {
         HISTORY.splice(HISTORY.index, (HISTORY.length - HISTORY.index));
         $('#redo').addClass('disabled');
     }
-    HISTORY.push(JSON.stringify({ objData: OBJDATA, wallData: WALLS, roomData: ROOM }));
+    HISTORY.push(JSON.stringify({ objData: OBJDATA, wallData: WALLS, roomData: ROOM, curvedWallData: curvedWallsData }));
     localStorage.setItem('history', JSON.stringify(HISTORY));
     HISTORY.index++;
     if (HISTORY.index > 1) $('#undo').removeClass('disabled');
@@ -337,6 +340,12 @@ function load(index = HISTORY.index, boot = false) {
         }
     }
     ROOM = historyTemp.roomData;
+
+    // Load curved walls if available
+    if (historyTemp.curvedWallData && typeof deserializeCurvedWalls === 'function') {
+        deserializeCurvedWalls(historyTemp.curvedWallData);
+    }
+
     editor.architect(WALLS);
     editor.showScaleBox();
     rib();
@@ -1627,6 +1636,10 @@ function raz_button() {
     $('#object_mode').addClass('btn-default');
     $('#stair_mode').removeClass('btn-success');
     $('#stair_mode').addClass('btn-default');
+    $('#arc_wall_mode').removeClass('btn-success');
+    $('#arc_wall_mode').addClass('btn-default');
+    $('#bezier_wall_mode').removeClass('btn-success');
+    $('#bezier_wall_mode').addClass('btn-default');
 }
 
 function fonc_button(modesetting, option) {
@@ -1734,6 +1747,93 @@ $('#text_mode').click(function () {
     $('#boxinfo').html('Add text<br/><span style=\"font-size:0.7em\">Place the cursor to the desired location, then ' +
         'type your text.</span>');
     fonc_button('text_mode');
+});
+
+// ARC WALL MODE
+$('#arc_wall_mode').click(function () {
+    linElement.css('cursor', 'crosshair');
+    $('#boxinfo').html('Arc Wall: Click to set center point');
+    $('#panel').hide(100);
+    $('#curvedWallTools').show(200);
+    $('#arcSettings').show();
+    $('#bezierSettings').hide();
+    document.getElementById('titleCurvedWallTools').textContent = "Arc Wall Settings";
+    fonc_button('arc_mode');
+    if (typeof curvedWallsUI !== 'undefined') {
+        curvedWallsUI.initArcMode();
+    }
+});
+
+// BEZIER WALL MODE
+$('#bezier_wall_mode').click(function () {
+    linElement.css('cursor', 'crosshair');
+    $('#boxinfo').html('Bezier Wall: Click and drag to set start point');
+    $('#panel').hide(100);
+    $('#curvedWallTools').show(200);
+    $('#arcSettings').hide();
+    $('#bezierSettings').show();
+    document.getElementById('titleCurvedWallTools').textContent = "Bezier Wall Settings";
+    fonc_button('bezier_mode');
+    if (typeof curvedWallsUI !== 'undefined') {
+        curvedWallsUI.initBezierMode();
+    }
+});
+
+// Curved wall thickness slider
+$('#curvedWallThickness').on('input', function () {
+    if (typeof curvedWallsUI !== 'undefined') {
+        curvedWallsUI.curvedWallThickness = parseInt(this.value);
+    }
+    $('#curvedWallThicknessVal').text(this.value);
+});
+
+// Bezier tension slider
+$('#bezierTension').on('input', function () {
+    $('#bezierTensionVal').text(this.value);
+});
+
+// ============================================================================
+// GENERATOR UI HANDLERS
+// ============================================================================
+
+var currentGenerator = null;
+
+$('#btnGenerate').click(function () {
+    // Get parameters from UI
+    var nodeCount = parseInt($('#genNodeCount').val()) || 6;
+    var kMeans = parseInt($('#genKMeans').val()) || 3;
+    var minOverlap = parseInt($('#genIntersectionDensity').val()) || 1;
+
+    // Clear previous generation if exists
+    if (currentGenerator) {
+        currentGenerator.clear();
+    }
+
+    // Create new graph-based generator
+    currentGenerator = new GraphKMeansBehaviour({
+        centerX: originX_viewbox + width_viewbox / 2,
+        centerY: originY_viewbox + height_viewbox / 2,
+        minRadius: 140,
+        maxRadius: Math.min(width_viewbox, height_viewbox) * 0.45,
+        nodeRadius: 8,
+        kMeans: kMeans,
+        rectMinOverlap: minOverlap
+    });
+
+    $('#boxinfo').html('Generating star graph...');
+    $('#generator_panel').hide(200);
+
+    var result = currentGenerator.generate(nodeCount, kMeans);
+    $('#boxinfo').html('Graph: ' + result.nodes.length + ' nodes, ' + result.edges.length + ' edges (k=' + result.kMeans + ', dens=' + minOverlap + ')');
+});
+
+$('#btnClearGen').click(function () {
+    if (currentGenerator) {
+        currentGenerator.clear();
+        currentGenerator = null;
+        $('#boxinfo').html('Graph cleared');
+    }
+    $('#generator_panel').hide(200);
 });
 
 $('#grid_mode').click(function () {

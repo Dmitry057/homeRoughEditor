@@ -170,6 +170,43 @@
     </ul>
   </div>
 
+  <div id="curvedWallTools" class="leftBox">
+    <h2 id="titleCurvedWallTools">Curved Wall Settings</h2>
+    <hr />
+    <section id="curvedWallThicknessSection">
+      <p>Wall Thickness: <span id="curvedWallThicknessVal">20</span> px</p>
+      <input type="range" id="curvedWallThickness" min="5" max="50" value="20" step="1" class="range" />
+    </section>
+    <br />
+    <section id="arcSettings" style="display:none">
+      <p><strong>Arc Wall Mode</strong></p>
+      <p style="font-size:0.85em;color:#666">
+        1. Click to set center point<br/>
+        2. Drag to set radius<br/>
+        3. Click to set arc end
+      </p>
+      <div class="funkyradio" style="font-size:0.8em">
+        <div class="funkyradio-success">
+          <input type="checkbox" id="arcClockwise" checked />
+          <label for="arcClockwise">Clockwise by default</label>
+        </div>
+      </div>
+    </section>
+    <section id="bezierSettings" style="display:none">
+      <p><strong>Bezier Wall Mode</strong></p>
+      <p style="font-size:0.85em;color:#666">
+        1. Click & drag for start point + direction<br/>
+        2. Click & drag for end point + direction
+      </p>
+      <p>Curve Tension: <span id="bezierTensionVal">0.4</span></p>
+      <input type="range" id="bezierTension" min="0.1" max="0.8" value="0.4" step="0.05" class="range" />
+    </section>
+    <br />
+    <button class="btn btn-info fully" style="margin-top:20px"
+      onclick="fonc_button('select_mode');$('#boxinfo').html('Selection mode');$('#curvedWallTools').hide('300');$('#panel').show('300');curvedWallsUI.exitCurvedMode();"><i
+        class="fa fa-2x fa-backward" aria-hidden="true"></i></button>
+  </div>
+
   <div id="objBoundingBox" class="leftBox">
     <h2>Modify object</h2>
     <hr />
@@ -356,6 +393,10 @@
           data-placement="right" title="Make walls">WALL</button>
         <button class="mt-2 btn btn-light shadow fully " style="margin-bottom:0px" id="partition_mode"
           data-toggle="tooltip" data-placement="right" title="Make partitions wall">PARTITION</button>
+        <button class="mt-2 btn btn-light shadow fully " style="margin-bottom:0px;background:#e8f5e9" id="arc_wall_mode"
+          data-toggle="tooltip" data-placement="right" title="Make arc/curved walls">ARC WALL</button>
+        <button class="mt-2 btn btn-light shadow fully " style="margin-bottom:0px;background:#e3f2fd" id="bezier_wall_mode"
+          data-toggle="tooltip" data-placement="right" title="Make bezier curved walls">BEZIER WALL</button>
         <div class="funkyradio" style="font-size:0.8em">
           <div class="funkyradio-success">
             <input type="checkbox" id="multi" checked />
@@ -440,6 +481,32 @@
 
       <li><button class="btn btn-light shadow fully " id="layer_mode"
           onclick="$('.sub').hide();$('#layer_list').toggle(200);">Layers</button></li>
+      <br />
+      <li><button class="btn btn-warning shadow fully " id="generate_mode"
+          onclick="$('.sub').hide();$('#generator_panel').toggle(200);">GENERATE</button></li>
+
+      <div id="generator_panel" class="list-unstyled sub"
+        style="box-shadow:2px 2px 3px #ccc;display:none;background:#fff;border-radius: 0 5px 5px 0; padding:15px;position:absolute;left:200px;bottom:140px;width:220px">
+        <p style="margin-bottom:10px"><strong>Graph K-Means Generator</strong></p>
+        <p style="font-size:0.85em;margin-bottom:5px">Node count:</p>
+        <input type="number" id="genNodeCount" value="6" min="2" max="24" step="1"
+          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
+        <p style="font-size:0.85em;margin-bottom:5px">k (means):</p>
+        <input type="number" id="genKMeans" value="3" min="1" max="12" step="1"
+          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
+        <p style="font-size:0.85em;margin-bottom:5px">Intersection Density:</p>
+        <input type="number" id="genIntersectionDensity" value="2" min="1" max="10" step="1"
+          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
+        <p style="font-size:0.75em;color:#666;margin-bottom:10px">
+          Points are spawned with noise near center; each node links to its k nearest neighbors.
+        </p>
+        <button class="btn btn-success fully" id="btnGenerate" style="margin-bottom:5px">
+          <i class="fa fa-magic" aria-hidden="true"></i> Generate
+        </button>
+        <button class="btn btn-danger fully" id="btnClearGen">
+          <i class="fa fa-trash" aria-hidden="true"></i> Clear
+        </button>
+      </div>
 
       <div id="layer_list" class="list-unstyled sub"
         style="box-shadow:2px 2px 3px #ccc;display:none;background:#fff;border-radius: 0 5px 5px 0; padding:10px;position:absolute;left:200px;bottom:100px;width:200px">
@@ -614,9 +681,21 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.min.js"
   integrity="sha384-IDwe1+LCz02ROU9k972gdyvl+AESN10+x7tBKgc9I5HFtuNz0wWnPclzo6p9vxnk" crossorigin="anonymous"></script>
 <script src="mousewheel.js"></script>
-<script src="func.js"></script>
+<script type="module">
+  import * as noise from './noise.js';
+  window.noise = noise;
+  window.orgBlenderNoise = noise.orgBlenderNoise;
+</script>
 <script src="qSVG.js"></script>
+<script src="graph.js"></script>
 <script src="editor.js"></script>
+<script src="curvedWalls.js"></script>
+<script src="curvedWallsUI.js"></script>
+<script src="Pawn.js"></script>
+<script src="Generator.js"></script>
+<script src="ProceduralGeneratorBehaviour.js"></script>
+<script src="GraphKMeansBehaviour.js"></script>
+<script src="func.js"></script>
 <script src="engine.js"></script>
 
 </html>
