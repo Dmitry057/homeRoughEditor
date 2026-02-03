@@ -497,14 +497,14 @@
         <p style="font-size:0.85em;margin-bottom:5px">Intersection Density:</p>
         <input type="number" id="genIntersectionDensity" value="2" min="1" max="10" step="1"
           style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
+        <p style="font-size:0.85em;margin-bottom:5px">Wall Thickness (px):</p>
+        <input type="number" id="genWallThickness" value="20" min="5" max="80" step="1"
+          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
         <p style="font-size:0.75em;color:#666;margin-bottom:10px">
           Points are spawned with noise near center; each node links to its k nearest neighbors.
         </p>
         <button class="btn btn-success fully" id="btnGenerate" style="margin-bottom:5px">
           <i class="fa fa-magic" aria-hidden="true"></i> Generate
-        </button>
-        <button class="btn btn-danger fully" id="btnClearGen">
-          <i class="fa fa-trash" aria-hidden="true"></i> Clear
         </button>
       </div>
 

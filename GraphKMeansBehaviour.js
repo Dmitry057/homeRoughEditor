@@ -33,6 +33,7 @@ function GraphKMeansBehaviour(options) {
   this.edges = [];
   this.builtWalls = [];
   this.builtPawns = [];
+  this.wallThickness = options.wallThickness || 20;
   this.graph = new Graph({
     layerId: this.config.layerId,
     nodeRadius: this.config.nodeRadius
@@ -393,32 +394,44 @@ GraphKMeansBehaviour.prototype._buildWallsFromSegments = function (segments) {
 
     var i = 0;
     while (i < edges.length) {
-      // Pattern: parallel, turn, parallel -> Bezier (50%)
-      if (i <= edges.length - 3 &&
-          this._orient(edges[i]) === this._orient(edges[i + 2]) &&
-          this._orient(edges[i]) !== this._orient(edges[i + 1])) {
-        if (Math.random() < 0.5) {
-          var bezStart = { x: edges[i].x1, y: edges[i].y1 };
-          var bezEnd = { x: edges[i + 2].x2, y: edges[i + 2].y2 };
-          var startDir = this._dir(edges[i]);
-          var endDir = this._dir(edges[i + 2]);
-          this._buildBezier(bezStart, bezEnd, startDir, endDir);
-          i += 3;
-          continue;
+      // Pattern: parallel (same direction), turn, parallel (same direction) -> Bezier (50%)
+      if (i <= edges.length - 3) {
+        var d1 = this._dir(edges[i]);
+        var d2 = this._dir(edges[i + 1]);
+        var d3 = this._dir(edges[i + 2]);
+        var len1 = this._len(edges[i]);
+        var len2 = this._len(edges[i + 1]);
+        var len3 = this._len(edges[i + 2]);
+        var sameDir13 = this._dot(d1, d3) > 0.95;            // same orientation, not opposite
+        var turn12 = Math.abs(this._dot(d1, d2)) < 0.2;       // roughly perpendicular
+        var longerSides = len1 > len2 && len3 > len2;        // first and third longer than middle
+        if (sameDir13 && turn12 && longerSides) {
+          if (Math.random() < 0.5) {
+            var bezStart = { x: edges[i].x1, y: edges[i].y1 };
+            var bezEnd = { x: edges[i + 2].x2, y: edges[i + 2].y2 };
+            this._buildBezier(bezStart, bezEnd, d1, d3);
+            i += 3;
+            continue;
+          }
         }
       }
 
       // Pattern: simple corner -> Arc (30%)
       if (i <= edges.length - 2 &&
           this._orient(edges[i]) !== this._orient(edges[i + 1])) {
-        if (Math.random() < 0.3) {
-          var arcStart = { x: edges[i].x1, y: edges[i].y1 };
-          var arcEnd = { x: edges[i + 1].x2, y: edges[i + 1].y2 };
-          var arcStartDir = this._dir(edges[i]);
-          var arcEndDir = this._dir(edges[i + 1]);
-          this._buildArc(arcStart, arcEnd, arcStartDir, arcEndDir);
-          i += 2;
-          continue;
+        var lenA = this._len(edges[i]);
+        var lenB = this._len(edges[i + 1]);
+        if (Math.abs(lenA - lenB) <= Math.max(lenA, lenB) * 0.1) { // lengths within 10%
+          if (Math.random() < 0.3) {
+            var arcStart = { x: edges[i].x1, y: edges[i].y1 };
+            var arcEnd = { x: edges[i + 1].x2, y: edges[i + 1].y2 };
+            var arcStartDir = this._dir(edges[i]);
+            var arcEndDir = this._dir(edges[i + 1]);
+            // ensure arc bends toward the corner (use segment order)
+            this._buildArc(arcStart, arcEnd, arcStartDir, arcEndDir);
+            i += 2;
+            continue;
+          }
         }
       }
 
@@ -426,6 +439,12 @@ GraphKMeansBehaviour.prototype._buildWallsFromSegments = function (segments) {
       this._buildWall(edges[i]);
       i += 1;
     }
+  }
+
+  // Refresh displays
+  editor.architect(WALLS);
+  if (typeof renderAllCurvedWalls === 'function') {
+    renderAllCurvedWalls();
   }
 };
 
@@ -484,8 +503,18 @@ GraphKMeansBehaviour.prototype._dir = function (seg) {
   return { x: dx / len, y: dy / len };
 };
 
+GraphKMeansBehaviour.prototype._len = function (seg) {
+  var dx = seg.x2 - seg.x1;
+  var dy = seg.y2 - seg.y1;
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
+GraphKMeansBehaviour.prototype._dot = function (a, b) {
+  return a.x * b.x + a.y * b.y;
+};
+
 GraphKMeansBehaviour.prototype._buildBezier = function (start, end, startDir, endDir) {
-  var pawn = new Pawn(start, startDir, 20);
+  var pawn = new Pawn(start, startDir, this.wallThickness);
   pawn.buildBezier(end, endDir, 0.4);
   var wall = pawn.addToEditor();
   if (wall) {
@@ -495,8 +524,13 @@ GraphKMeansBehaviour.prototype._buildBezier = function (start, end, startDir, en
 };
 
 GraphKMeansBehaviour.prototype._buildArc = function (start, end, startDir, endDir) {
-  var pawn = new Pawn(start, startDir, 20);
+  var pawn = new Pawn(start, startDir, this.wallThickness);
   pawn.buildArcTo(end, endDir);
+  // Preserve directions for correct sweep in curvedWalls
+  if (pawn.wallData) {
+    pawn.wallData.startDirection = startDir;
+    pawn.wallData.endDirection = endDir;
+  }
   var wall = pawn.addToEditor();
   if (wall) {
     this.builtWalls.push(wall);
@@ -505,10 +539,16 @@ GraphKMeansBehaviour.prototype._buildArc = function (start, end, startDir, endDi
 };
 
 GraphKMeansBehaviour.prototype._buildWall = function (seg) {
-  var start = { x: seg.x1, y: seg.y1 };
-  var end = { x: seg.x2, y: seg.y2 };
   var dir = this._dir(seg);
-  var pawn = new Pawn(start, dir, 20);
+  var start = {
+    x: seg.x1 - dir.x * (this.wallThickness / 2),
+    y: seg.y1 - dir.y * (this.wallThickness / 2)
+  };
+  var end = {
+    x: seg.x2 + dir.x * (this.wallThickness / 2),
+    y: seg.y2 + dir.y * (this.wallThickness / 2)
+  };
+  var pawn = new Pawn(start, dir, this.wallThickness);
   pawn.buildWallTo(end);
   var wall = pawn.addToEditor();
   if (wall) {

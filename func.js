@@ -1803,6 +1803,7 @@ $('#btnGenerate').click(function () {
     var nodeCount = parseInt($('#genNodeCount').val()) || 6;
     var kMeans = parseInt($('#genKMeans').val()) || 3;
     var minOverlap = parseInt($('#genIntersectionDensity').val()) || 1;
+    var wallThickness = parseInt($('#genWallThickness').val()) || 20;
 
     // Clear previous generation if exists
     if (currentGenerator) {
@@ -1817,23 +1818,15 @@ $('#btnGenerate').click(function () {
         maxRadius: Math.min(width_viewbox, height_viewbox) * 0.45,
         nodeRadius: 8,
         kMeans: kMeans,
-        rectMinOverlap: minOverlap
+        rectMinOverlap: minOverlap,
+        wallThickness: wallThickness
     });
 
     $('#boxinfo').html('Generating star graph...');
     $('#generator_panel').hide(200);
 
     var result = currentGenerator.generate(nodeCount, kMeans);
-    $('#boxinfo').html('Graph: ' + result.nodes.length + ' nodes, ' + result.edges.length + ' edges (k=' + result.kMeans + ', dens=' + minOverlap + ')');
-});
-
-$('#btnClearGen').click(function () {
-    if (currentGenerator) {
-        currentGenerator.clear();
-        currentGenerator = null;
-        $('#boxinfo').html('Graph cleared');
-    }
-    $('#generator_panel').hide(200);
+    $('#boxinfo').html('Graph: ' + result.nodes.length + ' nodes, ' + result.edges.length + ' edges (k=' + result.kMeans + ', dens=' + minOverlap + ', t=' + wallThickness + ')');
 });
 
 $('#grid_mode').click(function () {
