@@ -31,6 +31,8 @@ function GraphKMeansBehaviour(options) {
   this.kMeans = options.kMeans || 3;
   this.nodes = [];
   this.edges = [];
+  this.builtWalls = [];
+  this.builtPawns = [];
   this.graph = new Graph({
     layerId: this.config.layerId,
     nodeRadius: this.config.nodeRadius
@@ -112,8 +114,19 @@ GraphKMeansBehaviour.prototype.generate = function (numNodes, kMeans) {
 };
 
 GraphKMeansBehaviour.prototype.clear = function () {
+  // remove generated walls
+  for (var i = 0; i < this.builtWalls.length; i++) {
+    var wall = this.builtWalls[i];
+    if (wall && wall.graph) wall.graph.remove();
+    var idx = WALLS.indexOf(wall);
+    if (idx > -1) WALLS.splice(idx, 1);
+    var cidx = CURVED_WALLS.indexOf(wall);
+    if (cidx > -1) CURVED_WALLS.splice(cidx, 1);
+  }
   this.nodes = [];
   this.edges = [];
+  this.builtWalls = [];
+  this.builtPawns = [];
   if (this.graph) {
     this.graph.clear();
   }
@@ -328,6 +341,9 @@ GraphKMeansBehaviour.prototype._renderUnion = function (rects) {
       'pointer-events': 'none'
     });
   }
+
+  // Build walls along merged boundary
+  this._buildWallsFromSegments(mergedSegments);
 };
 
 GraphKMeansBehaviour.prototype._neighborsFor = function (id) {
@@ -361,4 +377,142 @@ GraphKMeansBehaviour.prototype._noise = function (x, y) {
     );
   }
   return Math.random();
+};
+
+// ======================================================================
+// Wall building from merged boundary segments
+// ======================================================================
+
+GraphKMeansBehaviour.prototype._buildWallsFromSegments = function (segments) {
+  if (!segments || segments.length === 0) return;
+
+  var loops = this._buildLoops(segments);
+  for (var l = 0; l < loops.length; l++) {
+    var edges = loops[l];
+    if (edges.length < 2) continue;
+
+    var i = 0;
+    while (i < edges.length) {
+      // Pattern: parallel, turn, parallel -> Bezier (50%)
+      if (i <= edges.length - 3 &&
+          this._orient(edges[i]) === this._orient(edges[i + 2]) &&
+          this._orient(edges[i]) !== this._orient(edges[i + 1])) {
+        if (Math.random() < 0.5) {
+          var bezStart = { x: edges[i].x1, y: edges[i].y1 };
+          var bezEnd = { x: edges[i + 2].x2, y: edges[i + 2].y2 };
+          var startDir = this._dir(edges[i]);
+          var endDir = this._dir(edges[i + 2]);
+          this._buildBezier(bezStart, bezEnd, startDir, endDir);
+          i += 3;
+          continue;
+        }
+      }
+
+      // Pattern: simple corner -> Arc (30%)
+      if (i <= edges.length - 2 &&
+          this._orient(edges[i]) !== this._orient(edges[i + 1])) {
+        if (Math.random() < 0.3) {
+          var arcStart = { x: edges[i].x1, y: edges[i].y1 };
+          var arcEnd = { x: edges[i + 1].x2, y: edges[i + 1].y2 };
+          var arcStartDir = this._dir(edges[i]);
+          var arcEndDir = this._dir(edges[i + 1]);
+          this._buildArc(arcStart, arcEnd, arcStartDir, arcEndDir);
+          i += 2;
+          continue;
+        }
+      }
+
+      // Default: straight wall for current edge
+      this._buildWall(edges[i]);
+      i += 1;
+    }
+  }
+};
+
+GraphKMeansBehaviour.prototype._buildLoops = function (segments) {
+  var loops = [];
+  var unused = segments.slice();
+
+  function samePoint(a, b) {
+    return Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
+  }
+
+  while (unused.length) {
+    var seg = unused.shift();
+    var loop = [seg];
+    var start = { x: seg.x1, y: seg.y1 };
+    var currentEnd = { x: seg.x2, y: seg.y2 };
+
+    var closed = false;
+    while (!closed && unused.length) {
+      var foundIdx = -1;
+      for (var i = 0; i < unused.length; i++) {
+        var s = unused[i];
+        if (samePoint({ x: s.x1, y: s.y1 }, currentEnd)) {
+          foundIdx = i;
+          break;
+        }
+        if (samePoint({ x: s.x2, y: s.y2 }, currentEnd)) {
+          // flip orientation
+          unused[i] = { x1: s.x2, y1: s.y2, x2: s.x1, y2: s.y1, h: s.h };
+          foundIdx = i;
+          break;
+        }
+      }
+      if (foundIdx === -1) break;
+      var nextSeg = unused.splice(foundIdx, 1)[0];
+      loop.push(nextSeg);
+      currentEnd = { x: nextSeg.x2, y: nextSeg.y2 };
+      if (samePoint(currentEnd, start)) {
+        closed = true;
+      }
+    }
+    loops.push(loop);
+  }
+
+  return loops;
+};
+
+GraphKMeansBehaviour.prototype._orient = function (seg) {
+  return Math.abs(seg.x2 - seg.x1) >= Math.abs(seg.y2 - seg.y1) ? 'h' : 'v';
+};
+
+GraphKMeansBehaviour.prototype._dir = function (seg) {
+  var dx = seg.x2 - seg.x1;
+  var dy = seg.y2 - seg.y1;
+  var len = Math.sqrt(dx * dx + dy * dy) || 1;
+  return { x: dx / len, y: dy / len };
+};
+
+GraphKMeansBehaviour.prototype._buildBezier = function (start, end, startDir, endDir) {
+  var pawn = new Pawn(start, startDir, 20);
+  pawn.buildBezier(end, endDir, 0.4);
+  var wall = pawn.addToEditor();
+  if (wall) {
+    this.builtWalls.push(wall);
+    this.builtPawns.push(pawn);
+  }
+};
+
+GraphKMeansBehaviour.prototype._buildArc = function (start, end, startDir, endDir) {
+  var pawn = new Pawn(start, startDir, 20);
+  pawn.buildArcTo(end, endDir);
+  var wall = pawn.addToEditor();
+  if (wall) {
+    this.builtWalls.push(wall);
+    this.builtPawns.push(pawn);
+  }
+};
+
+GraphKMeansBehaviour.prototype._buildWall = function (seg) {
+  var start = { x: seg.x1, y: seg.y1 };
+  var end = { x: seg.x2, y: seg.y2 };
+  var dir = this._dir(seg);
+  var pawn = new Pawn(start, dir, 20);
+  pawn.buildWallTo(end);
+  var wall = pawn.addToEditor();
+  if (wall) {
+    this.builtWalls.push(wall);
+    this.builtPawns.push(pawn);
+  }
 };
