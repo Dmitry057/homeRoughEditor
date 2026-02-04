@@ -20,6 +20,146 @@ grid = 20;
 showRib = true;
 showArea = true;
 meter = 60;
+
+// Smooth movement interpolation system
+var smoothMove = {
+    enabled: true,
+    // Current interpolated position
+    current: { x: 0, y: 0 },
+    // Target position (actual mouse)
+    target: { x: 0, y: 0 },
+    // Previous position for velocity calculation
+    prev: { x: 0, y: 0 },
+    // Interpolation factor (0-1, higher = faster response)
+    // Lower value = smoother but slower response
+    lerpFactor: 0.25,
+    // Maximum distance per frame to prevent teleporting (in pixels)
+    maxSpeed: 80,
+    // Minimum distance to continue animating
+    snapThreshold: 1,
+    // Animation frame ID
+    animationId: null,
+    // Callback function to call on each animation frame
+    onUpdate: null,
+    // Last raw snap data
+    lastRawSnap: null,
+    // Initialize with a position
+    init: function(x, y) {
+        this.current.x = x;
+        this.current.y = y;
+        this.target.x = x;
+        this.target.y = y;
+        this.prev.x = x;
+        this.prev.y = y;
+        this.stopAnimation();
+    },
+    // Set new target position
+    setTarget: function(x, y) {
+        this.prev.x = this.target.x;
+        this.prev.y = this.target.y;
+        this.target.x = x;
+        this.target.y = y;
+    },
+    // Linear interpolation
+    lerp: function(start, end, t) {
+        return start + (end - start) * t;
+    },
+    // Smooth step for even smoother interpolation
+    smoothStep: function(t) {
+        return t * t * (3 - 2 * t);
+    },
+    // Update current position towards target
+    update: function() {
+        var dx = this.target.x - this.current.x;
+        var dy = this.target.y - this.current.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+
+        // If very close, snap to target
+        if (dist < this.snapThreshold) {
+            this.current.x = this.target.x;
+            this.current.y = this.target.y;
+            return false; // No more animation needed
+        }
+
+        // Calculate adaptive lerp factor based on distance
+        // Faster for small distances, slower for large
+        var adaptiveLerp = this.lerpFactor;
+        if (dist > this.maxSpeed) {
+            // For very large distances, use speed limiting
+            adaptiveLerp = this.maxSpeed / dist;
+        } else if (dist > 50) {
+            // For medium distances, use slightly faster lerp
+            adaptiveLerp = Math.min(this.lerpFactor * 1.5, 0.4);
+        }
+
+        // Apply smooth interpolation
+        this.current.x = this.lerp(this.current.x, this.target.x, adaptiveLerp);
+        this.current.y = this.lerp(this.current.y, this.target.y, adaptiveLerp);
+
+        return true; // Continue animating
+    },
+    // Start continuous animation loop
+    startAnimation: function(callback) {
+        var self = this;
+        this.onUpdate = callback;
+
+        function animate() {
+            if (self.update()) {
+                if (self.onUpdate) {
+                    self.onUpdate(self.current.x, self.current.y);
+                }
+                self.animationId = requestAnimationFrame(animate);
+            } else {
+                self.animationId = null;
+            }
+        }
+
+        if (!this.animationId) {
+            this.animationId = requestAnimationFrame(animate);
+        }
+    },
+    // Stop animation
+    stopAnimation: function() {
+        if (this.animationId) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+        this.onUpdate = null;
+    },
+    // Get smoothed snap coordinates (synchronous version)
+    getSmoothedSnap: function(rawSnap) {
+        // Disable smoothing when zoomed out (factor > 1.3) - it causes more problems than it solves
+        // At high zoom out levels, the coordinate scaling makes smoothing look like vibration
+        if (!this.enabled || factor > 1.3) {
+            // Still update internal state to prevent jumps when re-enabling
+            this.current.x = rawSnap.x;
+            this.current.y = rawSnap.y;
+            this.target.x = rawSnap.x;
+            this.target.y = rawSnap.y;
+            return rawSnap;
+        }
+
+        this.lastRawSnap = rawSnap;
+        this.setTarget(rawSnap.x, rawSnap.y);
+
+        this.update();
+
+        var result = {
+            x: Math.round(this.current.x),
+            y: Math.round(this.current.y),
+            xMouse: rawSnap.xMouse,
+            yMouse: rawSnap.yMouse
+        };
+
+        return result;
+    },
+    // Check if currently animating (position != target)
+    isAnimating: function() {
+        var dx = this.target.x - this.current.x;
+        var dy = this.target.y - this.current.y;
+        return Math.sqrt(dx * dx + dy * dy) >= this.snapThreshold;
+    }
+};
 grid_snap = 'off';
 colorbackground = "#ffffff";
 colorline = "#fff";
@@ -293,8 +433,21 @@ function save(boot = false) {
         HISTORY.splice(HISTORY.index, (HISTORY.length - HISTORY.index));
         $('#redo').addClass('disabled');
     }
-    HISTORY.push(JSON.stringify({ objData: OBJDATA, wallData: WALLS, roomData: ROOM, curvedWallData: curvedWallsData }));
-    localStorage.setItem('history', JSON.stringify(HISTORY));
+    var snapshot = JSON.stringify({ objData: OBJDATA, wallData: WALLS, roomData: ROOM, curvedWallData: curvedWallsData });
+
+    // Cap history length to avoid quota issues (keep last 20 states)
+    var MAX_HISTORY = 20;
+    if (HISTORY.length >= MAX_HISTORY) {
+        HISTORY = HISTORY.slice(HISTORY.length - (MAX_HISTORY - 1));
+        HISTORY.index = HISTORY.length;
+    }
+
+    HISTORY.push(snapshot);
+    try {
+        localStorage.setItem('history', JSON.stringify(HISTORY));
+    } catch (e) {
+        console.warn('History not saved to localStorage (quota exceeded)', e);
+    }
     HISTORY.index++;
     if (HISTORY.index > 1) $('#undo').removeClass('disabled');
     for (let k in WALLS) {
@@ -621,13 +774,21 @@ document.getElementById('wallWidth').addEventListener("input", function () {
     let sliderValue = this.value;
     binder.wall.thick = sliderValue;
     binder.wall.type = "normal";
-    editor.architect(WALLS);
-    let objWall = editor.objFromWall(binder.wall); // LIST OBJ ON EDGE
-    for (let w = 0; w < objWall.length; w++) {
-        objWall[w].thick = sliderValue;
-        objWall[w].update();
+    if (binder.wall.wallType === 'arc') {
+        curvedWalls.computeArcWall(binder.wall);
+        renderAllCurvedWalls();
+    } else if (binder.wall.wallType === 'bezier') {
+        curvedWalls.computeBezierWall(binder.wall);
+        renderAllCurvedWalls();
+    } else {
+        editor.architect(WALLS);
+        let objWall = editor.objFromWall(binder.wall); // LIST OBJ ON EDGE
+        for (let w = 0; w < objWall.length; w++) {
+            objWall[w].thick = sliderValue;
+            objWall[w].update();
+        }
+        rib();
     }
-    rib();
     document.getElementById("wallWidthVal").textContent = sliderValue;
 });
 
@@ -729,11 +890,8 @@ window.addEventListener("load", function () {
         document.getElementById('moveBox').style.transform = "translateX(-165px)";
         document.getElementById('zoomBox').style.transform = "translateX(-165px)";
     });
-    if (!localStorage.getItem('history')) {
-        $('#recover').html("<p>Select a plan type.");
-    }
-    const myModal = new bootstrap.Modal($('#myModal'))
-    myModal.show();
+    // Always start with a new empty plan, skip modal
+    initHistory();
 });
 
 document.getElementById('sizePolice').addEventListener("input", function () {
@@ -834,41 +992,53 @@ linElement.mousewheel(throttle(function (event) {
     }
 }, 100));
 
-document.getElementById("showRib").addEventListener("click", function () {
-    if (document.getElementById("showRib").checked) {
-        $('#boxScale').show(200);
-        $('#boxRib').show(200);
-        showRib = true;
-    } else {
-        $('#boxScale').hide(100);
-        $('#boxRib').hide(100);
-        showRib = false;
-    }
-});
+var elShowRib = document.getElementById("showRib");
+if (elShowRib) {
+    elShowRib.addEventListener("click", function () {
+        if (document.getElementById("showRib").checked) {
+            $('#boxScale').show(200);
+            $('#boxRib').show(200);
+            showRib = true;
+        } else {
+            $('#boxScale').hide(100);
+            $('#boxRib').hide(100);
+            showRib = false;
+        }
+    });
+}
 
-document.getElementById("showArea").addEventListener("click", function () {
-    if (document.getElementById("showArea").checked) {
-        $('#boxArea').show(200);
-    } else {
-        $('#boxArea').hide(100);
-    }
-});
+var elShowArea = document.getElementById("showArea");
+if (elShowArea) {
+    elShowArea.addEventListener("click", function () {
+        if (document.getElementById("showArea").checked) {
+            $('#boxArea').show(200);
+        } else {
+            $('#boxArea').hide(100);
+        }
+    });
+}
 
-document.getElementById("showLayerRoom").addEventListener("click", function () {
-    if (document.getElementById("showLayerRoom").checked) {
-        $('#boxRoom').show(200);
-    } else {
-        $('#boxRoom').hide(100);
-    }
-});
+var elShowLayerRoom = document.getElementById("showLayerRoom");
+if (elShowLayerRoom) {
+    elShowLayerRoom.addEventListener("click", function () {
+        if (document.getElementById("showLayerRoom").checked) {
+            $('#boxRoom').show(200);
+        } else {
+            $('#boxRoom').hide(100);
+        }
+    });
+}
 
-document.getElementById("showLayerEnergy").addEventListener("click", function () {
-    if (document.getElementById("showLayerEnergy").checked) {
-        $('#boxEnergy').show(200);
-    } else {
-        $('#boxEnergy').hide(100);
-    }
-});
+var elShowLayerEnergy = document.getElementById("showLayerEnergy");
+if (elShowLayerEnergy) {
+    elShowLayerEnergy.addEventListener("click", function () {
+        if (document.getElementById("showLayerEnergy").checked) {
+            $('#boxEnergy').show(200);
+        } else {
+            $('#boxEnergy').hide(100);
+        }
+    });
+}
 
 // document.getElementById("showLayerFurniture").addEventListener("click", function () {
 //   if (document.getElementById("showLayerFurniture").checked) {
@@ -934,7 +1104,10 @@ document.getElementById("wallTrash").addEventListener("click", function () {
             WALLS[k].parent = null;
         }
     }
-    WALLS.splice(WALLS.indexOf(wall), 1);
+    let idxW = WALLS.indexOf(wall);
+    if (idxW > -1) WALLS.splice(idxW, 1);
+    let idxC = CURVED_WALLS.indexOf(wall);
+    if (idxC > -1) CURVED_WALLS.splice(idxC, 1);
     $('#wallTools').hide(100);
     wall.graph.remove();
     binder.graph.remove();
@@ -1058,20 +1231,39 @@ function zoom_maker(lens, xmove, xview) {
         myDiv.style.width = 60 * ratioWidthZoom + 'px';
         originX_viewbox = originX_viewbox - (xmove / 2);
         originY_viewbox = originY_viewbox - (xmove / 2 * ratio_viewbox);
+
+        console.log('[ZOOM OUT]', {
+            zoom: zoom,
+            factor: width_viewbox / taille_w,
+            width_viewbox: width_viewbox,
+            height_viewbox: height_viewbox,
+            originX: originX_viewbox,
+            originY: originY_viewbox,
+            ratio_viewbox: ratio_viewbox
+        });
     }
     if (lens === 'zoomin' && zoom < 14 && zoom > 0) {
-        zoom++;
-        let oldWidth = width_viewbox;
-        width_viewbox -= xmove;
-        let ratioWidthZoom = taille_w / width_viewbox;
-        height_viewbox = width_viewbox * ratio_viewbox;
-        myDiv = document.getElementById("scaleVal");
-        myDiv.style.width = 60 * ratioWidthZoom + 'px';
+        // Prevent negative or too small viewbox
+        var minViewboxWidth = 100; // minimum viewbox width
+        var newWidth = width_viewbox - xmove;
 
-        originX_viewbox = originX_viewbox + (xmove / 2);
-        originY_viewbox = originY_viewbox + (xmove / 2 * ratio_viewbox);
+        if (newWidth >= minViewboxWidth) {
+            zoom++;
+            let oldWidth = width_viewbox;
+            width_viewbox = newWidth;
+            let ratioWidthZoom = taille_w / width_viewbox;
+            height_viewbox = width_viewbox * ratio_viewbox;
+            myDiv = document.getElementById("scaleVal");
+            myDiv.style.width = 60 * ratioWidthZoom + 'px';
+
+            originX_viewbox = originX_viewbox + (xmove / 2);
+            originY_viewbox = originY_viewbox + (xmove / 2 * ratio_viewbox);
+        } else {
+            console.warn('[ZOOM] Prevented zoom in - would create viewbox width:', newWidth);
+        }
     }
-    factor = width_viewbox / taille_w;
+    // Ensure factor is always positive
+    factor = Math.max(0.01, width_viewbox / taille_w);
     if (lens === 'zoomreset') {
         originX_viewbox = 0;
         originY_viewbox = 0;
@@ -1095,17 +1287,43 @@ function zoom_maker(lens, xmove, xview) {
         originX_viewbox -= xmove;
         originY_viewbox -= xview;
     }
-    $('svg').each(function () {
-        $(this)[0].setAttribute('viewBox', originX_viewbox + ' ' + originY_viewbox + ' ' + width_viewbox + ' ' + height_viewbox)
-    });
+    // Ensure viewBox values are valid before applying
+    if (width_viewbox > 0 && height_viewbox > 0) {
+        $('svg').each(function () {
+            $(this)[0].setAttribute('viewBox', originX_viewbox + ' ' + originY_viewbox + ' ' + width_viewbox + ' ' + height_viewbox)
+        });
+    } else {
+        console.error('[ZOOM] Invalid viewBox prevented:', { width_viewbox, height_viewbox });
+        // Reset to safe values
+        width_viewbox = taille_w;
+        height_viewbox = taille_h;
+        factor = 1;
+    }
 }
 
 tactile = false;
 
+// Debug logging for scale issues
+var debugScaleLog = {
+    enabled: true,
+    lastLogTime: 0,
+    logInterval: 500, // Log every 500ms max
+    log: function(context, data) {
+        if (!this.enabled) return;
+        var now = Date.now();
+        if (now - this.lastLogTime > this.logInterval) {
+            this.lastLogTime = now;
+            console.log('[SCALE DEBUG]', context, data);
+        }
+    },
+    warn: function(context, data) {
+        console.warn('[SCALE WARNING]', context, data);
+    }
+};
+
 function calcul_snap(event, state) {
     if (event.touches) {
         let touches = event.changedTouches;
-        console.log("toto")
         eX = touches[0].pageX;
         eY = touches[0].pageY;
         tactile = true;
@@ -1113,8 +1331,45 @@ function calcul_snap(event, state) {
         eX = event.pageX;
         eY = event.pageY;
     }
-    x_mouse = (eX * factor) - (offset.left * factor) + originX_viewbox;
-    y_mouse = (eY * factor) - (offset.top * factor) + originY_viewbox;
+
+    // Ensure factor is valid (positive and reasonable)
+    var safeFactor = (factor > 0 && factor < 100) ? factor : 1;
+    if (safeFactor !== factor) {
+        console.warn('[FACTOR OVERRIDE] Using safeFactor:', safeFactor, 'instead of:', factor);
+    }
+
+    x_mouse = (eX * safeFactor) - (offset.left * safeFactor) + originX_viewbox;
+    y_mouse = (eY * safeFactor) - (offset.top * safeFactor) + originY_viewbox;
+
+    // Debug logging for scale issues
+    if (mode === 'bind_mode') {
+        debugScaleLog.log('calcul_snap in bind_mode', {
+            factor: factor,
+            safeFactor: safeFactor,
+            zoom: zoom,
+            width_viewbox: width_viewbox,
+            height_viewbox: height_viewbox,
+            originX: originX_viewbox,
+            originY: originY_viewbox,
+            taille_w: taille_w,
+            taille_h: taille_h,
+            eX: eX,
+            eY: eY,
+            x_mouse: x_mouse,
+            y_mouse: y_mouse
+        });
+
+        // Warning for suspicious values
+        if (factor <= 0) {
+            debugScaleLog.warn('NEGATIVE OR ZERO FACTOR!', { factor: factor, width_viewbox: width_viewbox, taille_w: taille_w });
+        }
+        if (width_viewbox <= 0 || height_viewbox <= 0) {
+            debugScaleLog.warn('NEGATIVE VIEWBOX!', { width_viewbox: width_viewbox, height_viewbox: height_viewbox });
+        }
+        if (Math.abs(x_mouse) > 10000 || Math.abs(y_mouse) > 10000) {
+            debugScaleLog.warn('EXTREME COORDINATES!', { x_mouse: x_mouse, y_mouse: y_mouse, factor: factor });
+        }
+    }
 
     if (state === 'on') {
         x_grid = Math.round(x_mouse / grid) * grid;
@@ -1804,6 +2059,7 @@ $('#btnGenerate').click(function () {
     var kMeans = parseInt($('#genKMeans').val()) || 3;
     var minOverlap = parseInt($('#genIntersectionDensity').val()) || 1;
     var wallThickness = parseInt($('#genWallThickness').val()) || 20;
+    var showOverlay = $('#genShowOverlay').is(':checked');
 
     // Clear previous generation if exists
     if (currentGenerator) {
@@ -1819,14 +2075,26 @@ $('#btnGenerate').click(function () {
         nodeRadius: 8,
         kMeans: kMeans,
         rectMinOverlap: minOverlap,
-        wallThickness: wallThickness
+        wallThickness: wallThickness,
+        spawnOffsetX: 220,
+        spawnOffsetY: 0
     });
 
     $('#boxinfo').html('Generating star graph...');
-    $('#generator_panel').hide(200);
 
     var result = currentGenerator.generate(nodeCount, kMeans);
+    setOverlayVisibility(showOverlay);
     $('#boxinfo').html('Graph: ' + result.nodes.length + ' nodes, ' + result.edges.length + ' edges (k=' + result.kMeans + ', dens=' + minOverlap + ', t=' + wallThickness + ')');
+});
+
+function setOverlayVisibility(show) {
+    var disp = show ? null : 'none';
+    $('#graph-layer, #graph-rects, #graph-rect-union').attr('display', disp);
+}
+
+// Toggle handler
+$(document).on('change', '#genShowOverlay', function () {
+    setOverlayVisibility(this.checked);
 });
 
 $('#grid_mode').click(function () {

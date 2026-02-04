@@ -8,10 +8,12 @@
 
 function GraphKMeansBehaviour(options) {
   options = options || {};
+  var spawnOffsetX = options.spawnOffsetX !== undefined ? options.spawnOffsetX : 220;
+  var spawnOffsetY = options.spawnOffsetY !== undefined ? options.spawnOffsetY : 0;
 
   this.config = {
-    centerX: options.centerX || (originX_viewbox + width_viewbox / 2),
-    centerY: options.centerY || (originY_viewbox + height_viewbox / 2),
+    centerX: options.centerX || (originX_viewbox + width_viewbox / 2 + spawnOffsetX),
+    centerY: options.centerY || (originY_viewbox + height_viewbox / 2 + spawnOffsetY),
     minRadius: options.minRadius || 120,
     maxRadius: options.maxRadius || 260,
     jitterAngle: options.jitterAngle || 0.6, // random direction noise
@@ -21,6 +23,8 @@ function GraphKMeansBehaviour(options) {
     noiseSize: options.noiseSize || 0.25,
     noiseNabla: options.noiseNabla || 0.03,
     layerId: options.layerId || 'boxDebug',
+    spawnOffsetX: spawnOffsetX,
+    spawnOffsetY: spawnOffsetY,
     rectPadding: options.rectPadding || 10,
     rectStroke: options.rectStroke || '#ff7a00',
     rectStrokeWidth: options.rectStrokeWidth || 2,
@@ -392,6 +396,9 @@ GraphKMeansBehaviour.prototype._buildWallsFromSegments = function (segments) {
     var edges = loops[l];
     if (edges.length < 2) continue;
 
+    var lastEnd = null;
+    var firstStart = null;
+
     var i = 0;
     while (i < edges.length) {
       // Pattern: parallel (same direction), turn, parallel (same direction) -> Bezier (50%)
@@ -407,9 +414,11 @@ GraphKMeansBehaviour.prototype._buildWallsFromSegments = function (segments) {
         var longerSides = len1 > len2 && len3 > len2;        // first and third longer than middle
         if (sameDir13 && turn12 && longerSides) {
           if (Math.random() < 0.5) {
-            var bezStart = { x: edges[i].x1, y: edges[i].y1 };
+            var bezStart = lastEnd || { x: edges[i].x1, y: edges[i].y1 };
+            if (!firstStart) firstStart = bezStart;
             var bezEnd = { x: edges[i + 2].x2, y: edges[i + 2].y2 };
             this._buildBezier(bezStart, bezEnd, d1, d3);
+            lastEnd = bezEnd;
             i += 3;
             continue;
           }
@@ -423,12 +432,14 @@ GraphKMeansBehaviour.prototype._buildWallsFromSegments = function (segments) {
         var lenB = this._len(edges[i + 1]);
         if (Math.abs(lenA - lenB) <= Math.max(lenA, lenB) * 0.1) { // lengths within 10%
           if (Math.random() < 0.3) {
-            var arcStart = { x: edges[i].x1, y: edges[i].y1 };
+            var arcStart = lastEnd || { x: edges[i].x1, y: edges[i].y1 };
+            if (!firstStart) firstStart = arcStart;
             var arcEnd = { x: edges[i + 1].x2, y: edges[i + 1].y2 };
             var arcStartDir = this._dir(edges[i]);
             var arcEndDir = this._dir(edges[i + 1]);
             // ensure arc bends toward the corner (use segment order)
             this._buildArc(arcStart, arcEnd, arcStartDir, arcEndDir);
+            lastEnd = arcEnd;
             i += 2;
             continue;
           }
@@ -436,7 +447,10 @@ GraphKMeansBehaviour.prototype._buildWallsFromSegments = function (segments) {
       }
 
       // Default: straight wall for current edge
-      this._buildWall(edges[i]);
+      var segStart = lastEnd || { x: edges[i].x1, y: edges[i].y1 };
+      if (!firstStart) firstStart = segStart;
+      this._buildWall(edges[i], segStart);
+      lastEnd = { x: edges[i].x2, y: edges[i].y2 };
       i += 1;
     }
   }
@@ -538,16 +552,10 @@ GraphKMeansBehaviour.prototype._buildArc = function (start, end, startDir, endDi
   }
 };
 
-GraphKMeansBehaviour.prototype._buildWall = function (seg) {
+GraphKMeansBehaviour.prototype._buildWall = function (seg, startOverride) {
   var dir = this._dir(seg);
-  var start = {
-    x: seg.x1 - dir.x * (this.wallThickness / 2),
-    y: seg.y1 - dir.y * (this.wallThickness / 2)
-  };
-  var end = {
-    x: seg.x2 + dir.x * (this.wallThickness / 2),
-    y: seg.y2 + dir.y * (this.wallThickness / 2)
-  };
+  var start = startOverride || { x: seg.x1, y: seg.y1 };
+  var end = { x: seg.x2, y: seg.y2 };
   var pawn = new Pawn(start, dir, this.wallThickness);
   pawn.buildWallTo(end);
   var wall = pawn.addToEditor();

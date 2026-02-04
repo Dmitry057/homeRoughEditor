@@ -375,10 +375,12 @@ var qSVG = {
         else var nextEdge = wall[0];
         var angleEdge = Math.atan2(edge.y2 - edge.y1, edge.x2 - edge.x1);
         var angleNextEdge = Math.atan2(nextEdge.y2 - nextEdge.y1, nextEdge.x2 - nextEdge.x1);
-        var edgeThicknessX = (WALLS[edge.segment].thick/2) * Math.sin(angleEdge);
-        var edgeThicknessY = (WALLS[edge.segment].thick/2) * Math.cos(angleEdge);
-        var nextEdgeThicknessX = (WALLS[nextEdge.segment].thick/2) * Math.sin(angleNextEdge);
-        var nextEdgeThicknessY = (WALLS[nextEdge.segment].thick/2) * Math.cos(angleNextEdge);
+        var thickEdge = (WALLS[edge.segment] && WALLS[edge.segment].thick) ? WALLS[edge.segment].thick : 0;
+        var thickNext = (WALLS[nextEdge.segment] && WALLS[nextEdge.segment].thick) ? WALLS[nextEdge.segment].thick : thickEdge;
+        var edgeThicknessX = (thickEdge/2) * Math.sin(angleEdge);
+        var edgeThicknessY = (thickEdge/2) * Math.cos(angleEdge);
+        var nextEdgeThicknessX = (thickNext/2) * Math.sin(angleNextEdge);
+        var nextEdgeThicknessY = (thickNext/2) * Math.cos(angleNextEdge);
         var eqEdgeUp = qSVG.createEquation(edge.x1 + edgeThicknessX, edge.y1 - edgeThicknessY, edge.x2 + edgeThicknessX, edge.y2 - edgeThicknessY);
         var eqEdgeDw = qSVG.createEquation(edge.x1 - edgeThicknessX, edge.y1 + edgeThicknessY, edge.x2 - edgeThicknessX, edge.y2 + edgeThicknessY);
         var eqNextEdgeUp = qSVG.createEquation(nextEdge.x1 + nextEdgeThicknessX, nextEdge.y1 - nextEdgeThicknessY, nextEdge.x2 + nextEdgeThicknessX, nextEdge.y2 - nextEdgeThicknessY);
@@ -487,22 +489,22 @@ var qSVG = {
     },
 
     vertexList: function(junction, segment) {
+      // Use a small tolerance instead of integer rounding so tiny curved segments stay connected
+      var EPS = 0.02; // ~2cm at scale; keeps vertices distinct but merges numerical noise
       var vertex = [];
-      var vertextest = [];
       for (var jj = 0; jj < junction.length; jj++) {
-        var found = true;
+        var jx = Math.round(junction[jj].values[0] * 100) / 100;
+        var jy = Math.round(junction[jj].values[1] * 100) / 100;
+        var found = false;
         for (var vv = 0; vv < vertex.length; vv++) {
-          if ((Math.round(junction[jj].values[0]) == Math.round(vertex[vv].x)) && (Math.round(junction[jj].values[1]) == Math.round(vertex[vv].y))) {
-            found = false;
+          if (Math.abs(vertex[vv].x - jx) < EPS && Math.abs(vertex[vv].y - jy) < EPS) {
+            found = true;
             vertex[vv].segment.push(junction[jj].segment);
             break;
           }
-          else {
-            found = true;
-          }
         }
-        if (found) {
-          vertex.push({x: Math.round(junction[jj].values[0]), y: Math.round(junction[jj].values[1]), segment: [junction[jj].segment], bypass:0, type: junction[jj].type});
+        if (!found) {
+          vertex.push({x: jx, y: jy, segment: [junction[jj].segment], bypass:0, type: junction[jj].type});
         }
       }
 
@@ -683,7 +685,7 @@ var qSVG = {
     polygonize: function(segment) {
        junction = qSVG.junctionList(segment);
        vertex = qSVG.vertexList(junction, segment);
-       var vertexCopy = qSVG.vertexList(junction, segment);
+        var vertexCopy = qSVG.vertexList(junction, segment);
 
       var edgesChild = [];
       for (var j = 0; j < vertex.length; j++) {

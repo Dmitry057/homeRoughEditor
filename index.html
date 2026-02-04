@@ -377,7 +377,7 @@
     <br />
   </div>
 
-  <div id="panel" class="leftBox">
+  <div id="panel" class="leftBox" style="overflow-y:auto;overflow-x:hidden;max-height:100vh;">
     <ul class="list-unstyled">
       <li><button class="btn disabled halfy " id="undo" title="undo"><i class="fa fa-chevron-circle-left"
             aria-hidden="true"></i>
@@ -387,6 +387,38 @@
       <br />
       <li><button class="btn btn-success fully " id="select_mode" style="box-shadow:2px 2px 3px #ccc;"><i
             class="fa fa-2x fa-mouse-pointer" aria-hidden="true"></i></button></li>
+      <br />
+      <li><button class="btn btn-warning shadow fully " id="generate_mode">GENERATE</button></li>
+
+      <div id="generator_panel" class="list-unstyled"
+        style="box-shadow:2px 2px 3px #ccc;background:#fff;border-radius: 0 5px 5px 0; padding:15px;margin-top:8px;width:220px;position:relative;left:0;">
+        <p style="margin-bottom:10px"><strong>Graph K-Means Generator</strong></p>
+        <p style="font-size:0.85em;margin-bottom:5px">Node count:</p>
+        <input type="number" id="genNodeCount" value="60" min="2" max="200" step="1"
+          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
+        <p style="font-size:0.85em;margin-bottom:5px">k (means):</p>
+        <input type="number" id="genKMeans" value="1" min="1" max="12" step="1"
+          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
+        <p style="font-size:0.85em;margin-bottom:5px">Intersection Density:</p>
+        <input type="number" id="genIntersectionDensity" value="2" min="1" max="10" step="1"
+          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
+        <p style="font-size:0.85em;margin-bottom:5px">Wall Thickness (px):</p>
+        <input type="number" id="genWallThickness" value="5" min="2" max="80" step="1"
+          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
+        <div class="form-check" style="margin-bottom:10px">
+          <input class="form-check-input" type="checkbox" id="genShowOverlay">
+          <label class="form-check-label" for="genShowOverlay" style="font-size:0.85em">
+            Show graph & outlines
+          </label>
+        </div>
+        <p style="font-size:0.75em;color:#666;margin-bottom:10px">
+          Points are spawned with noise near center; each node links to its k nearest neighbors.
+        </p>
+        <button class="btn btn-success fully" id="btnGenerate" style="margin-bottom:5px">
+          <i class="fa fa-magic" aria-hidden="true"></i> Generate
+        </button>
+      </div>
+
       <br />
       <li>
         <button class="btn btn-light shadow fully " style="margin-bottom:0px" id="line_mode" data-toggle="tooltip"
@@ -482,59 +514,7 @@
       <li><button class="btn btn-light shadow fully " id="layer_mode"
           onclick="$('.sub').hide();$('#layer_list').toggle(200);">Layers</button></li>
       <br />
-      <li><button class="btn btn-warning shadow fully " id="generate_mode"
-          onclick="$('.sub').hide();$('#generator_panel').toggle(200);">GENERATE</button></li>
-
-      <div id="generator_panel" class="list-unstyled sub"
-        style="box-shadow:2px 2px 3px #ccc;display:none;background:#fff;border-radius: 0 5px 5px 0; padding:15px;position:absolute;left:200px;bottom:140px;width:220px">
-        <p style="margin-bottom:10px"><strong>Graph K-Means Generator</strong></p>
-        <p style="font-size:0.85em;margin-bottom:5px">Node count:</p>
-        <input type="number" id="genNodeCount" value="6" min="2" max="24" step="1"
-          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
-        <p style="font-size:0.85em;margin-bottom:5px">k (means):</p>
-        <input type="number" id="genKMeans" value="3" min="1" max="12" step="1"
-          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
-        <p style="font-size:0.85em;margin-bottom:5px">Intersection Density:</p>
-        <input type="number" id="genIntersectionDensity" value="2" min="1" max="10" step="1"
-          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
-        <p style="font-size:0.85em;margin-bottom:5px">Wall Thickness (px):</p>
-        <input type="number" id="genWallThickness" value="20" min="5" max="80" step="1"
-          style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
-        <p style="font-size:0.75em;color:#666;margin-bottom:10px">
-          Points are spawned with noise near center; each node links to its k nearest neighbors.
-        </p>
-        <button class="btn btn-success fully" id="btnGenerate" style="margin-bottom:5px">
-          <i class="fa fa-magic" aria-hidden="true"></i> Generate
-        </button>
-      </div>
-
-      <div id="layer_list" class="list-unstyled sub"
-        style="box-shadow:2px 2px 3px #ccc;display:none;background:#fff;border-radius: 0 5px 5px 0; padding:10px;position:absolute;left:200px;bottom:100px;width:200px">
-        <div class="funkyradio" style="font-size:0.8em">
-          <div class="funkyradio-info">
-            <input type="checkbox" id="showRib" checked />
-            <label for="showRib">Measurement</label>
-          </div>
-        </div>
-        <div class="funkyradio" style="font-size:0.8em">
-          <div class="funkyradio-info">
-            <input type="checkbox" id="showArea" checked />
-            <label for="showArea">Surface</label>
-          </div>
-        </div>
-        <div class="funkyradio" style="font-size:0.8em">
-          <div class="funkyradio-info">
-            <input type="checkbox" id="showLayerRoom" checked />
-            <label for="showLayerRoom">Texture</label>
-          </div>
-        </div>
-        <div class="funkyradio" style="font-size:0.8em">
-          <div class="funkyradio-info">
-            <input type="checkbox" id="showLayerEnergy" checked />
-            <label for="showLayerEnergy">Energy</label>
-          </div>
-        </div>
-      </div>
+      <li><button class="btn btn-warning shadow fully " id="generate_mode">GENERATE</button></li>
 
       <li><button class="btn btn-light shadow halfy " id="report_mode" title="Show report"><i class="fa fa-calculator"
             aria-hidden="true"></i>

@@ -1,5 +1,30 @@
 document.querySelector('#lin').addEventListener("mouseup", _MOUSEUP);
-document.querySelector('#lin').addEventListener("mousemove", throttle(function (event) { _MOUSEMOVE(event); }, 30));
+// Use requestAnimationFrame for smoother movement in bind mode
+var pendingMouseEvent = null;
+var rafId = null;
+// Movement threshold filter to prevent micro-vibrations
+var lastBindSnap = undefined;
+// Segment drag state - stores initial positions for delta-based movement
+var segmentDragState = {
+  initMouseX: 0,
+  initMouseY: 0,
+  initEquationB: 0
+};
+
+function processMouseMove() {
+    if (pendingMouseEvent) {
+        _MOUSEMOVE(pendingMouseEvent);
+        pendingMouseEvent = null;
+    }
+    rafId = null;
+}
+
+document.querySelector('#lin').addEventListener("mousemove", function(event) {
+    pendingMouseEvent = event;
+    if (!rafId) {
+        rafId = requestAnimationFrame(processMouseMove);
+    }
+});
 document.querySelector('#lin').addEventListener("mousedown", _MOUSEDOWN, true);
 
 $(document).on('click', '#lin', function (event) {
@@ -71,6 +96,14 @@ document.addEventListener("keydown", function (event) {
 function _MOUSEMOVE(event) {
   event.preventDefault();
   $('.sub').hide(100);
+
+  //**************************************************************************
+  //********************   CURVED WALLS MODE *********************************
+  //**************************************************************************
+  if (mode == 'arc_mode' || mode == 'bezier_mode') {
+    handleCurvedWallMouseMove(event);
+    return;
+  }
 
   //**************************************************************************
   //********************   TEXTE   MODE **************************************
@@ -738,10 +771,14 @@ function _MOUSEMOVE(event) {
           if (found) $('#line_construc').attr({ "stroke-opacity": 1 });
           else $('#line_construc').attr({ "stroke-opacity": 0.7 });
         }
+        // default straight helper
         $('#line_construc').attr({
           x2: x,
           y2: y
         });
+        if ($('#line_construc_path').length) {
+          $('#line_construc_path').remove();
+        }
 
         // SHOW WALL SIZE -------------------------------------------------------------------------
         var startText = qSVG.middle(pox, poy, x, y);
@@ -789,10 +826,54 @@ function _MOUSEMOVE(event) {
 
   if (mode == 'bind_mode') {
 
-    snap = calcul_snap(event, grid_snap);
+    var rawSnap = calcul_snap(event, grid_snap);
+
+    // DEBUG: Log raw input values to find vibration source
+    if (typeof window.debugBindMode === 'undefined') window.debugBindMode = { enabled: false, history: [] };
+    if (window.debugBindMode.enabled) {
+      var entry = {
+        time: Date.now(),
+        eX: event.pageX,
+        eY: event.pageY,
+        offsetLeft: offset.left,
+        offsetTop: offset.top,
+        factor: factor,
+        rawX: rawSnap.x,
+        rawY: rawSnap.y
+      };
+      window.debugBindMode.history.push(entry);
+      if (window.debugBindMode.history.length > 2) {
+        var prev = window.debugBindMode.history[window.debugBindMode.history.length - 2];
+        var dEX = entry.eX - prev.eX;
+        var dEY = entry.eY - prev.eY;
+        var dRawX = entry.rawX - prev.rawX;
+        var dRawY = entry.rawY - prev.rawY;
+        // Detect direction reversal (sign change) which indicates vibration
+        if (window.debugBindMode.history.length > 3) {
+          var prev2 = window.debugBindMode.history[window.debugBindMode.history.length - 3];
+          var prevDRawX = prev.rawX - prev2.rawX;
+          var prevDRawY = prev.rawY - prev2.rawY;
+          if ((prevDRawX > 0 && dRawX < 0) || (prevDRawX < 0 && dRawX > 0) ||
+              (prevDRawY > 0 && dRawY < 0) || (prevDRawY < 0 && dRawY > 0)) {
+            console.warn('[VIBRATION DETECTED]', {
+              mousePixelDelta: { dEX, dEY },
+              svgDelta: { dRawX, dRawY },
+              prevSvgDelta: { prevDRawX, prevDRawY },
+              factor: factor,
+              offset: { left: offset.left, top: offset.top }
+            });
+          }
+        }
+      }
+      // Keep only last 10 entries
+      if (window.debugBindMode.history.length > 10) window.debugBindMode.history.shift();
+    }
+
+    // Use smooth interpolation for bind mode to prevent flickering
+    snap = smoothMove.getSmoothedSnap(rawSnap);
 
     if (binder.type == 'node') {
-      var coords = snap;
+      var coords = { x: snap.x, y: snap.y };
       var magnetic = false;
       for (var k in wallListRun) {
         if (isObjectsEquals(wallListRun[k].end, binder.data)) {
@@ -880,15 +961,52 @@ function _MOUSEMOVE(event) {
     // WALL MOVING ----BINDER TYPE SEGMENT-------- FUNCTION FOR H,V and Calculate Vectorial Translation
 
     if (binder.type == 'segment' && action == 1) {
+      console.log('[SEGMENT] factor=' + factor.toFixed(2) + ' snap=' + Math.round(snap.x) + ',' + Math.round(snap.y));
       rib();
 
-      if (equation2.A == 'v') { equation2.B = snap.x; }
-      else if (equation2.A == 'h') { equation2.B = snap.y; }
-      else { equation2.B = snap.y - (snap.x * equation2.A); }
+      // Store previous wall position for comparison
+      var prevStart = { x: binder.wall.start.x, y: binder.wall.start.y };
+      var prevEnd = { x: binder.wall.end.x, y: binder.wall.end.y };
+
+      // Use delta-based movement to prevent jumping
+      // Calculate how much mouse moved from initial position, then apply that delta to initial equation B
+      var deltaX = snap.x - segmentDragState.initMouseX;
+      var deltaY = snap.y - segmentDragState.initMouseY;
+
+      if (equation2.A == 'v') {
+        // Vertical wall: B is x-coordinate, so apply deltaX
+        equation2.B = segmentDragState.initEquationB + deltaX;
+      }
+      else if (equation2.A == 'h') {
+        // Horizontal wall: B is y-coordinate, so apply deltaY
+        equation2.B = segmentDragState.initEquationB + deltaY;
+      }
+      else {
+        // Angled wall: need to calculate delta in terms of B
+        // For line y = Ax + B, moving perpendicular to line changes B
+        // Delta in B = deltaY - deltaX * A (projection onto perpendicular direction)
+        var deltaB = deltaY - deltaX * equation2.A;
+        equation2.B = segmentDragState.initEquationB + deltaB;
+      }
 
       var intersection1 = qSVG.intersectionOfEquations(equation1, equation2, "obj");
       var intersection2 = qSVG.intersectionOfEquations(equation2, equation3, "obj");
       var intersection3 = qSVG.intersectionOfEquations(equation1, equation3, "obj");
+
+      // DEBUG: Detect teleportation - always log when factor > 1.5
+      var jump1 = Math.sqrt(Math.pow(intersection1.x - prevStart.x, 2) + Math.pow(intersection1.y - prevStart.y, 2));
+      var jump2 = Math.sqrt(Math.pow(intersection2.x - prevEnd.x, 2) + Math.pow(intersection2.y - prevEnd.y, 2));
+      if (factor > 1.5 && (jump1 > 30 || jump2 > 30)) {
+        console.log('[SEGMENT MOVE]', {
+          snap: { x: Math.round(snap.x), y: Math.round(snap.y) },
+          eq2: { A: equation2.A, B: Math.round(equation2.B) },
+          inter1: { x: Math.round(intersection1.x), y: Math.round(intersection1.y) },
+          inter2: { x: Math.round(intersection2.x), y: Math.round(intersection2.y) },
+          prev: { startX: Math.round(prevStart.x), startY: Math.round(prevStart.y) },
+          jumps: { j1: Math.round(jump1), j2: Math.round(jump2) },
+          factor: factor.toFixed(2)
+        });
+      }
 
       if (binder.wall.parent != null) {
         if (isObjectsEquals(binder.wall.parent.end, binder.wall.start)) binder.wall.parent.end = intersection1;
@@ -1121,6 +1239,15 @@ function _MOUSEMOVE(event) {
 function _MOUSEDOWN(event) {
 
   event.preventDefault();
+
+  // *******************************************************************
+  // **************************   CURVED WALLS MODE   ******************
+  // *******************************************************************
+  if (mode == 'arc_mode' || mode == 'bezier_mode') {
+    handleCurvedWallMouseDown(event);
+    return;
+  }
+
   // *******************************************************************
   // **************************   DISTANCE MODE   **********************
   // *******************************************************************
@@ -1163,6 +1290,8 @@ function _MOUSEDOWN(event) {
   if (mode == 'select_mode') {
     if (typeof (binder) != 'undefined' && (binder.type == 'segment' || binder.type == 'node' || binder.type == 'obj' || binder.type == 'boundingBox')) {
       mode = 'bind_mode';
+      // Reset movement filter for new drag operation
+      lastBindSnap = undefined;
 
       if (binder.type == 'obj') {
         action = 1;
@@ -1179,6 +1308,10 @@ function _MOUSEDOWN(event) {
         pox = node.x;
         poy = node.y;
         var nodeControl = { x: pox, y: poy };
+        // Initialize smooth movement from MOUSE position (not node position)
+        // This prevents desync when factor > 1 (zoomed out)
+        var initSnap = calcul_snap(event, grid_snap);
+        smoothMove.init(initSnap.x, initSnap.y);
 
         // DETERMINATE DISTANCE OF OPPOSED NODE ON EDGE(s) PARENT(s) OF THIS NODE !!!! NODE 1 -- NODE 2 SYSTE% :-(
         wallListObj = []; // SUPER VAR -- WARNING
@@ -1221,6 +1354,16 @@ function _MOUSEDOWN(event) {
         var wall = binder.wall;
         binder.before = binder.wall.start;
         equation2 = editor.createEquationFromWall(wall);
+        // Initialize smooth movement from MOUSE position (not wall midpoint)
+        // This prevents desync when factor > 1 (zoomed out)
+        var initSnap = calcul_snap(event, grid_snap);
+        smoothMove.init(initSnap.x, initSnap.y);
+
+        // Store initial state for delta-based movement
+        // This prevents wall from jumping - we move based on mouse delta, not absolute position
+        segmentDragState.initMouseX = initSnap.x;
+        segmentDragState.initMouseY = initSnap.y;
+        segmentDragState.initEquationB = equation2.B;
         if (wall.parent != null) {
           equation1 = editor.createEquationFromWall(wall.parent);
           var angle12 = qSVG.angleBetweenEquations(equation1.A, equation2.A);
@@ -1390,6 +1533,17 @@ function _MOUSEUP(event) {
   if (showRib) $('#boxScale').show(200);
   drag = 'off';
   cursor('default');
+  // Stop smooth movement animation
+  smoothMove.stopAnimation();
+
+  // *******************************************************************
+  // **************************   CURVED WALLS MODE   ******************
+  // *******************************************************************
+  if (mode == 'arc_mode' || mode == 'bezier_mode') {
+    handleCurvedWallMouseUp(event);
+    return;
+  }
+
   if (mode == 'select_mode') {
     if (typeof (binder) != 'undefined') {
       binder.remove();
@@ -1589,6 +1743,10 @@ function _MOUSEUP(event) {
   if (mode == 'bind_mode') {
     action = 0;
     construc = 0; // CONSTRUC 0 TO FREE BINDER GROUP NODE WALL MOVING
+    // Reset segment drag state
+    segmentDragState.initMouseX = 0;
+    segmentDragState.initMouseY = 0;
+    segmentDragState.initEquationB = 0;
     if (typeof (binder) != 'undefined') {
       fonc_button('select_mode');
       if (binder.type == 'node') {

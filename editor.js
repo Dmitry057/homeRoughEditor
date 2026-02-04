@@ -147,9 +147,9 @@ var editor = {
       }
       else {
         var eqP = qSVG.perpendicularEquation(eqWallUp, wall.start.x, wall.start.y);
-        // var previousWall = wall.parent;
-        //   var previousWallStart = previousWall.start;
-        //   var previousWallEnd = previousWall.end;
+        var previousWall = wall.parent;
+        var previousWallStart = previousWall.start;
+        var previousWallEnd = previousWall.end;
         var anglePreviousWall = Math.atan2(previousWallEnd.y - previousWallStart.y, previousWallEnd.x - previousWallStart.x);
         var previousWallThickX = (previousWall.thick / 2) * Math.sin(anglePreviousWall);
         var previousWallThickY = (previousWall.thick / 2) * Math.cos(anglePreviousWall);
@@ -223,6 +223,11 @@ var editor = {
       wall.graph = editor.makeWall(dWay);
       $('#boxwall').append(wall.graph);
     }
+
+    // Re-render curved walls that were cleared when #boxwall was emptied
+    if (typeof renderAllCurvedWalls === 'function') {
+      renderAllCurvedWalls();
+    }
   },
 
   makeWall: function (way) {
@@ -272,10 +277,79 @@ var editor = {
 
   architect: function (WALLS) {
     editor.wallsComputing(WALLS);
+
+    // Build combined segment list with linearized curved walls for room detection
+    var combined = WALLS.slice();
+    if (typeof CURVED_WALLS !== 'undefined') {
+      for (var c = 0; c < CURVED_WALLS.length; c++) {
+        var w = CURVED_WALLS[c];
+        var pts = [];
+        var segmentsArc = 48;
+        var segmentsBezier = 24;
+        function snap(pt) {
+          return { x: Math.round(pt.x * 100) / 100, y: Math.round(pt.y * 100) / 100 };
+        }
+        if (w.wallType === 'arc') {
+          // normalize to smaller arc for polygonization
+          var sa = w.startAngle;
+          var ea = w.endAngle;
+          var delta = ea - sa;
+          while (delta > Math.PI) { ea -= Math.PI * 2; delta = ea - sa; }
+          while (delta < -Math.PI) { ea += Math.PI * 2; delta = ea - sa; }
+          pts = curvedWalls.arcPoints(w.center, w.radius, sa, ea, segmentsArc);
+          if (pts.length) {
+            pts[0] = { x: w.start.x, y: w.start.y };
+            pts[pts.length - 1] = { x: w.end.x, y: w.end.y };
+          }
+        } else if (w.wallType === 'bezier') {
+          pts = curvedWalls.offsetBezierPoints(w.start, w.cp1, w.cp2, w.end, 0, segmentsBezier);
+          for (var bp = 0; bp < pts.length; bp++) {
+            pts[bp] = snap(pts[bp]);
+          }
+        }
+        for (var p = 0; p < pts.length - 1; p++) {
+          combined.push(new editor.wall(pts[p], pts[p + 1], "normal", w.thick));
+        }
+      }
+    }
+
+    // Build snapped copy for polygonize to avoid floating-point gaps
+    function snapPt(pt) {
+      return {
+        x: Math.round(pt.x * 100) / 100,
+        y: Math.round(pt.y * 100) / 100
+      };
+    }
+    var snappedCombined = [];
+    for (var cbi = 0; cbi < combined.length; cbi++) {
+      var wtmp = combined[cbi];
+      var s = snapPt(wtmp.start);
+      var e = snapPt(wtmp.end);
+      snappedCombined.push(new editor.wall(s, e, "normal", wtmp.thick));
+    }
+
+    // Temporarily swap WALLS for polygonize to use snapped list (thickness lookups rely on WALLS)
+    var realWALLS = WALLS;
+    WALLS = snappedCombined;
     Rooms = qSVG.polygonize(WALLS);
+    WALLS = realWALLS;
+
+    // Keep all closed polygons (including inner courts/holes) as rooms
+    var polys = Rooms.polygons || [];
+    // Ensure inside indexes don't break drawing; we fill everything
+    for (var i = 0; i < polys.length; i++) {
+      polys[i].inside = [];
+      // Recompute area without subtracting inner holes
+      polys[i].area = qSVG.area(polys[i].coords || []);
+    }
+    ROOM = polys;
     $('#boxRoom').empty();
     $('#boxSurface').empty();
-    editor.roomMaker(Rooms);
+    var RoomsObj = { polygons: polys };
+    editor.roomMaker(RoomsObj);
+    if (typeof renderAllCurvedWalls === 'function') {
+      renderAllCurvedWalls();
+    }
     return true;
   },
 
@@ -380,19 +454,35 @@ var editor = {
     var wallDistance = Infinity;
     var wallSelected = {};
     var result;
-    if (WALLS.length == 0) return false;
-    for (var e = 0; e < WALLS.length; e++) {
-      var eq1 = qSVG.createEquation(WALLS[e].coords[0].x, WALLS[e].coords[0].y, WALLS[e].coords[3].x, WALLS[e].coords[3].y);
-      result1 = qSVG.nearPointOnEquation(eq1, snap);
-      var eq2 = qSVG.createEquation(WALLS[e].coords[1].x, WALLS[e].coords[1].y, WALLS[e].coords[2].x, WALLS[e].coords[2].y);
-      result2 = qSVG.nearPointOnEquation(eq2, snap);
-      if (result1.distance < wallDistance && qSVG.btwn(result1.x, WALLS[e].coords[0].x, WALLS[e].coords[3].x) && qSVG.btwn(result1.y, WALLS[e].coords[0].y, WALLS[e].coords[3].y)) {
-        wallDistance = result1.distance;
-        wallSelected = { wall: WALLS[e], x: result1.x, y: result1.y, distance: result1.distance };
-      }
-      if (result2.distance < wallDistance && qSVG.btwn(result2.x, WALLS[e].coords[1].x, WALLS[e].coords[2].x) && qSVG.btwn(result2.y, WALLS[e].coords[1].y, WALLS[e].coords[2].y)) {
-        wallDistance = result2.distance;
-        wallSelected = { wall: WALLS[e], x: result2.x, y: result2.y, distance: result2.distance };
+    var allWalls = WALLS.concat(CURVED_WALLS || []);
+    if (allWalls.length == 0) return false;
+    for (var e = 0; e < allWalls.length; e++) {
+      var w = allWalls[e];
+      // For curved walls, approximate with centerline segments from coords pairs
+      if (w.wallType === 'arc' || w.wallType === 'bezier') {
+        for (var p = 0; p < w.coords.length; p++) {
+          var p1 = w.coords[p];
+          var p2 = w.coords[(p + 1) % w.coords.length];
+          var eqc = qSVG.createEquation(p1.x, p1.y, p2.x, p2.y);
+          var res = qSVG.nearPointOnEquation(eqc, snap);
+          if (res.distance < wallDistance && qSVG.btwn(res.x, p1.x, p2.x) && qSVG.btwn(res.y, p1.y, p2.y)) {
+            wallDistance = res.distance;
+            wallSelected = { wall: w, x: res.x, y: res.y, distance: res.distance };
+          }
+        }
+      } else {
+        var eq1 = qSVG.createEquation(w.coords[0].x, w.coords[0].y, w.coords[3].x, w.coords[3].y);
+        result1 = qSVG.nearPointOnEquation(eq1, snap);
+        var eq2 = qSVG.createEquation(w.coords[1].x, w.coords[1].y, w.coords[2].x, w.coords[2].y);
+        result2 = qSVG.nearPointOnEquation(eq2, snap);
+        if (result1.distance < wallDistance && qSVG.btwn(result1.x, w.coords[0].x, w.coords[3].x) && qSVG.btwn(result1.y, w.coords[0].y, w.coords[3].y)) {
+          wallDistance = result1.distance;
+          wallSelected = { wall: w, x: result1.x, y: result1.y, distance: result1.distance };
+        }
+        if (result2.distance < wallDistance && qSVG.btwn(result2.x, w.coords[1].x, w.coords[2].x) && qSVG.btwn(result2.y, w.coords[1].y, w.coords[2].y)) {
+          wallDistance = result2.distance;
+          wallSelected = { wall: w, x: result2.x, y: result2.y, distance: result2.distance };
+        }
       }
     }
     var vv = editor.nearVertice(snap);
@@ -437,13 +527,16 @@ var editor = {
   // WALLS SUPER ARRAY
   rayCastingWalls: function (snap) {
     var wallList = [];
-    for (var i = 0; i < WALLS.length; i++) {
+    var allWalls = WALLS.concat(CURVED_WALLS || []);
+    for (var i = 0; i < allWalls.length; i++) {
+      var w = allWalls[i];
+      if (!w.coords || w.coords.length === 0) continue;
       var polygon = [];
-      for (var pp = 0; pp < 4; pp++) {
-        polygon.push({ x: WALLS[i].coords[pp].x, y: WALLS[i].coords[pp].y }); // FOR Z
+      for (var pp = 0; pp < w.coords.length; pp++) {
+        polygon.push({ x: w.coords[pp].x, y: w.coords[pp].y });
       }
       if (qSVG.rayCasting(snap, polygon)) {
-        wallList.push(WALLS[i]); // Return EDGES Index
+        wallList.push(w);
       }
     }
     if (wallList.length == 0) return false;
@@ -748,7 +841,9 @@ var editor = {
         fill: '#fff', 'fill-opacity': 1, stroke: 'none', 'fill-rule': 'evenodd', class: 'room'
       });
 
+      if (!ROOM[rr].coords || ROOM[rr].coords.length === 0) continue;
       var centroid = qSVG.polygonVisualCenter(ROOM[rr]);
+      if (!centroid || centroid.y === undefined || centroid.x === undefined) continue;
 
       if (ROOM[rr].name != '') {
         var styled = { color: '#343938' };
@@ -804,16 +899,17 @@ var editor = {
   nearVertice: function (snap, range = 10000) {
     var bestDistance = Infinity;
     var bestVertice;
-    for (var i = 0; i < WALLS.length; i++) {
-      var distance1 = qSVG.gap(snap, { x: WALLS[i].start.x, y: WALLS[i].start.y });
-      var distance2 = qSVG.gap(snap, { x: WALLS[i].end.x, y: WALLS[i].end.y });
+    var allWalls = WALLS.concat(CURVED_WALLS || []);
+    for (var i = 0; i < allWalls.length; i++) {
+      var distance1 = qSVG.gap(snap, { x: allWalls[i].start.x, y: allWalls[i].start.y });
+      var distance2 = qSVG.gap(snap, { x: allWalls[i].end.x, y: allWalls[i].end.y });
       if (distance1 < distance2 && distance1 < bestDistance) {
         bestDistance = distance1;
-        bestVertice = { number: WALLS[i], x: WALLS[i].start.x, y: WALLS[i].start.y, distance: Math.sqrt(bestDistance) };
+        bestVertice = { number: allWalls[i], x: allWalls[i].start.x, y: allWalls[i].start.y, distance: Math.sqrt(bestDistance) };
       }
       if (distance2 < distance1 && distance2 < bestDistance) {
         bestDistance = distance2;
-        bestVertice = { number: WALLS[i], x: WALLS[i].end.x, y: WALLS[i].end.y, distance: Math.sqrt(bestDistance) };
+        bestVertice = { number: allWalls[i], x: allWalls[i].end.x, y: allWalls[i].end.y, distance: Math.sqrt(bestDistance) };
       }
     }
     if (bestDistance < range * range) return bestVertice;
@@ -824,17 +920,33 @@ var editor = {
     var wallDistance = Infinity;
     var wallSelected = {};
     var result;
-    if (WALLS.length == 0) return false;
-    for (var e = 0; e < WALLS.length; e++) {
-      var eq = qSVG.createEquation(WALLS[e].start.x, WALLS[e].start.y, WALLS[e].end.x, WALLS[e].end.y);
-      result = qSVG.nearPointOnEquation(eq, snap);
-      if (result.distance < wallDistance && qSVG.btwn(result.x, WALLS[e].start.x, WALLS[e].end.x) && qSVG.btwn(result.y, WALLS[e].start.y, WALLS[e].end.y)) {
-        wallDistance = result.distance;
-        wallSelected = { wall: WALLS[e], x: result.x, y: result.y, distance: result.distance };
+    var allWalls = WALLS.concat(CURVED_WALLS || []);
+    if (allWalls.length == 0) return false;
+    for (var e = 0; e < allWalls.length; e++) {
+      var w = allWalls[e];
+      if (w.wallType === 'arc' || w.wallType === 'bezier') {
+        // sample along coords segments
+        for (var p = 0; p < w.coords.length; p++) {
+          var p1 = w.coords[p];
+          var p2 = w.coords[(p + 1) % w.coords.length];
+          var eqc = qSVG.createEquation(p1.x, p1.y, p2.x, p2.y);
+          var res = qSVG.nearPointOnEquation(eqc, snap);
+          if (res.distance < wallDistance && qSVG.btwn(res.x, p1.x, p2.x) && qSVG.btwn(res.y, p1.y, p2.y)) {
+            wallDistance = res.distance;
+            wallSelected = { wall: w, x: res.x, y: res.y, distance: res.distance };
+          }
+        }
+      } else {
+        var eq = qSVG.createEquation(w.start.x, w.start.y, w.end.x, w.end.y);
+        result = qSVG.nearPointOnEquation(eq, snap);
+        if (result.distance < wallDistance && qSVG.btwn(result.x, w.start.x, w.end.x) && qSVG.btwn(result.y, w.start.y, w.end.y)) {
+          wallDistance = result.distance;
+          wallSelected = { wall: w, x: result.x, y: result.y, distance: result.distance };
+        }
       }
     }
     var vv = editor.nearVertice(snap);
-    if (vv.distance < wallDistance) {
+    if (vv && vv.distance < wallDistance) {
       wallDistance = vv.distance;
       wallSelected = { wall: vv.number, x: vv.x, y: vv.y, distance: vv.distance };
     }
