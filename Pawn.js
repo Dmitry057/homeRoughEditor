@@ -484,14 +484,20 @@ Pawn.prototype.createWall = function() {
 
 /**
  * Add the wall to the editor and render it
+ * @param {Object} options - Optional settings
+ * @param {boolean} options.skipArchitect - Skip architect call (for batch operations)
+ * @param {boolean} options.skipSave - Skip save call (for batch operations)
  * @returns {Object} The created wall object
  */
-Pawn.prototype.addToEditor = function() {
+Pawn.prototype.addToEditor = function(options) {
+  options = options || {};
   var wall = this.createWall();
 
   if (this.type === 'wall') {
     WALLS.push(wall);
-    editor.architect(WALLS);
+    if (!options.skipArchitect) {
+      editor.architect(WALLS);
+    }
   } else {
     CURVED_WALLS.push(wall);
     if (this.type === 'arc') {
@@ -501,7 +507,9 @@ Pawn.prototype.addToEditor = function() {
     }
   }
 
-  save();
+  if (!options.skipSave) {
+    save();
+  }
   return wall;
 };
 

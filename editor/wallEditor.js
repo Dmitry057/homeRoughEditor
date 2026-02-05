@@ -276,8 +276,12 @@
   };
 
   editor.architect = function (WALLS) {
+    console.time('   6️⃣ architect() total');
+    console.time('      6a. wallsComputing');
     editor.wallsComputing(WALLS);
+    console.timeEnd('      6a. wallsComputing');
 
+    console.time('      6b. linearize curves');
     // Build combined segment list with linearized curved walls for room detection
     var combined = WALLS.slice();
     if (typeof CURVED_WALLS !== 'undefined') {
@@ -313,6 +317,9 @@
       }
     }
 
+    console.timeEnd('      6b. linearize curves');
+
+    console.time('      6c. snap points');
     // Build snapped copy for polygonize to avoid floating-point gaps
     function snapPt(pt) {
       return {
@@ -327,15 +334,21 @@
       var e = snapPt(wtmp.end);
       snappedCombined.push(new editor.wall(s, e, "normal", wtmp.thick));
     }
+    console.timeEnd('      6c. snap points');
+    console.log('         Walls for polygonize:', snappedCombined.length);
 
     // Temporarily swap WALLS for polygonize to use snapped list (thickness lookups rely on WALLS)
     var realWALLS = WALLS;
     WALLS = snappedCombined;
+    console.time('      6d. ⚠️ POLYGONIZE');
     Rooms = qSVG.polygonize(WALLS);
+    console.timeEnd('      6d. ⚠️ POLYGONIZE');
     WALLS = realWALLS;
 
+    console.time('      6e. process rooms');
     // Keep all closed polygons (including inner courts/holes) as rooms
     var polys = Rooms.polygons || [];
+    console.log('         Polygons found:', polys.length);
     // Ensure inside indexes don't break drawing; we fill everything
     for (var i = 0; i < polys.length; i++) {
       polys[i].inside = [];
@@ -346,10 +359,18 @@
     $('#boxRoom').empty();
     $('#boxSurface').empty();
     var RoomsObj = { polygons: polys };
+    console.timeEnd('      6e. process rooms');
+
+    console.time('      6f. roomMaker (render)');
     editor.roomMaker(RoomsObj);
+    console.timeEnd('      6f. roomMaker (render)');
+
     if (typeof renderAllCurvedWalls === 'function') {
+      console.time('      6g. renderAllCurvedWalls');
       renderAllCurvedWalls();
+      console.timeEnd('      6g. renderAllCurvedWalls');
     }
+    console.timeEnd('   6️⃣ architect() total');
     return true;
   };
 

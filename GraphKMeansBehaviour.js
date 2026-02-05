@@ -47,20 +47,39 @@ GraphKMeansBehaviour.prototype.generate = function (numNodes, kMeans) {
   numNodes = Math.max(2, parseInt(numNodes, 10) || 5);
   this.kMeans = kMeans !== undefined ? kMeans : this.kMeans;
 
-  this.clear();
+  console.log('%c=== Pipeline Start ===', 'background: #222; color: #bada55; font-size: 14px;');
+  console.time('🔷 TOTAL pipeline');
 
+  console.time('1️⃣ Clear previous');
+  this.clear();
+  console.timeEnd('1️⃣ Clear previous');
+
+  console.time('2️⃣ Generate graph (nodes + edges)');
   var data = this.generator.generate(numNodes, this.kMeans);
   this.nodes = data.nodes;
   this.edges = data.edges;
+  console.timeEnd('2️⃣ Generate graph (nodes + edges)');
+  console.log('   Nodes:', this.nodes.length, 'Edges:', this.edges.length);
 
+  console.time('3️⃣ Render graph visualization');
   this.graph.render(this.nodes, this.edges);
+  console.timeEnd('3️⃣ Render graph visualization');
 
+  console.time('4️⃣ Area estimator (rectangles + union)');
   var segments = this.areaEstimator.render(this.nodes, this.edges);
   this.areaSegments = segments;
+  console.timeEnd('4️⃣ Area estimator (rectangles + union)');
+  console.log('   Segments:', segments ? segments.length : 0);
 
+  console.time('5️⃣ Wall spawner (build walls)');
   var spawned = this.wallSpawner.buildFromSegments(segments);
   this.builtWalls = spawned.walls;
   this.builtPawns = spawned.pawns;
+  console.timeEnd('5️⃣ Wall spawner (build walls)');
+  console.log('   Walls:', this.builtWalls.length);
+
+  console.timeEnd('🔷 TOTAL pipeline');
+  console.log('%c=== Pipeline End ===', 'background: #222; color: #bada55; font-size: 14px;');
 
   return {
     nodes: this.nodes,

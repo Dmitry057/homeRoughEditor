@@ -80,9 +80,13 @@ WallSpawner.prototype.buildFromSegments = function (segments) {
     }
   }
 
+  // Call architect and save ONCE at the end (instead of per-wall)
   editor.architect(WALLS);
   if (typeof renderAllCurvedWalls === 'function') {
     renderAllCurvedWalls();
+  }
+  if (typeof save === 'function') {
+    save();
   }
 
   return { walls: builtWalls, pawns: builtPawns };
@@ -164,7 +168,8 @@ WallSpawner.prototype._dot = function (a, b) {
 WallSpawner.prototype._buildBezier = function (start, end, startDir, endDir) {
   var pawn = new Pawn(start, startDir, this.wallThickness);
   pawn.buildBezier(end, endDir, 0.4);
-  var wall = pawn.addToEditor();
+  // Skip architect and save for batch operation - will be called once at the end
+  var wall = pawn.addToEditor({ skipArchitect: true, skipSave: true });
   return { wall: wall, pawn: pawn };
 };
 
@@ -175,7 +180,8 @@ WallSpawner.prototype._buildArc = function (start, end, startDir, endDir) {
     pawn.wallData.startDirection = startDir;
     pawn.wallData.endDirection = endDir;
   }
-  var wall = pawn.addToEditor();
+  // Skip architect and save for batch operation - will be called once at the end
+  var wall = pawn.addToEditor({ skipArchitect: true, skipSave: true });
   return { wall: wall, pawn: pawn };
 };
 
@@ -185,6 +191,7 @@ WallSpawner.prototype._buildWall = function (seg, startOverride) {
   var end = { x: seg.x2, y: seg.y2 };
   var pawn = new Pawn(start, dir, this.wallThickness);
   pawn.buildWallTo(end);
-  var wall = pawn.addToEditor();
+  // Skip architect and save for batch operation - will be called once at the end
+  var wall = pawn.addToEditor({ skipArchitect: true, skipSave: true });
   return { wall: wall, pawn: pawn };
 };

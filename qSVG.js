@@ -447,12 +447,19 @@ var qSVG = {
       var junction = [];
       var segmentJunction = [];
       var junctionChild = [];
+
+      // Pre-compute all equations once (optimization: avoid redundant calculations)
+      var equations = [];
+      for (var e = 0; e < WALLS.length; e++) {
+        equations.push(qSVG.createEquation(WALLS[e].start.x, WALLS[e].start.y, WALLS[e].end.x, WALLS[e].end.y));
+      }
+
       // JUNCTION ARRAY LIST ALL SEGMENT INTERSECTIONS
       for (var i = 0; i < WALLS.length; i++) {
-        var equation1 = qSVG.createEquation(WALLS[i].start.x, WALLS[i].start.y, WALLS[i].end.x, WALLS[i].end.y);
+        var equation1 = equations[i];
         for (var v = 0; v < WALLS.length; v++) {
           if (v != i) {
-            var equation2 = qSVG.createEquation(WALLS[v].start.x, WALLS[v].start.y, WALLS[v].end.x, WALLS[v].end.y);
+            var equation2 = equations[v];
             var intersec;
             if (intersec = qSVG.intersectionOfEquations(equation1, equation2)) {
 
@@ -508,50 +515,69 @@ var qSVG = {
         }
       }
 
+      // Build segment -> vertices index for O(1) lookup (optimization: O(n⁴) -> O(n))
+      var segmentToVertices = {};
+      for (var vv = 0; vv < vertex.length; vv++) {
+        for (var sg = 0; sg < vertex[vv].segment.length; sg++) {
+          var segId = vertex[vv].segment[sg];
+          if (!segmentToVertices[segId]) segmentToVertices[segId] = [];
+          segmentToVertices[segId].push(vv);
+        }
+      }
+
       var toClean = [];
       for (var ss = 0; ss < vertex.length; ss++) {
         vertex[ss].child = [];
         vertex[ss].removed = [];
+        // Use index lookup instead of nested loops
+        var addedChildren = {};  // Prevent duplicate children
         for (var sg = 0; sg < vertex[ss].segment.length; sg++) {
-          for (var sc = 0; sc < vertex.length; sc++) {
-            if (sc != ss) {
-              for (var scg = 0; scg < vertex[sc].segment.length; scg++) {
-                if (vertex[sc].segment[scg] == vertex[ss].segment[sg]) {
-                  vertex[ss].child.push({id: sc, angle: Math.floor(qSVG.getAngle(vertex[ss], vertex[sc]).deg)});
-                }
-              }
+          var segId = vertex[ss].segment[sg];
+          var neighbors = segmentToVertices[segId] || [];
+          for (var ni = 0; ni < neighbors.length; ni++) {
+            var sc = neighbors[ni];
+            if (sc !== ss && !addedChildren[sc]) {
+              addedChildren[sc] = true;
+              vertex[ss].child.push({id: sc, angle: Math.floor(qSVG.getAngle(vertex[ss], vertex[sc]).deg)});
             }
           }
         }
-        toClean = [];
-        for (var fr = 0; fr < vertex[ss].child.length-1; fr++) {
-          for (var ft = fr+1; ft < vertex[ss].child.length; ft++) {
-            if (fr != ft && typeof(vertex[ss].child[fr])!='undefined') {
+        // Optimized: sort by angle, then single pass to find near-duplicates O(n log n) instead of O(n²)
+        if (vertex[ss].child.length > 1) {
+          // Sort children by angle
+          vertex[ss].child.sort(function(a, b) { return a.angle - b.angle; });
 
-              found = true;
-
-              if (qSVG.btwn(vertex[ss].child[ft].angle, vertex[ss].child[fr].angle+3, vertex[ss].child[fr].angle-3, 'round') && found)
-              {
-                var dOne = qSVG.gap(vertex[ss], vertex[vertex[ss].child[ft].id]);
-                var dTwo = qSVG.gap(vertex[ss], vertex[vertex[ss].child[fr].id]);
-                if (dOne > dTwo) {
-                  toClean.push(ft);
-                }
-                else {
-                  toClean.push(fr);
-                  }
+          // Single pass: find children with similar angles (within ±3 degrees)
+          toClean = [];
+          for (var fr = 0; fr < vertex[ss].child.length - 1; fr++) {
+            var angleDiff = Math.abs(vertex[ss].child[fr + 1].angle - vertex[ss].child[fr].angle);
+            // Also check wrap-around (e.g., 358° vs 1°)
+            if (angleDiff <= 6 || angleDiff >= 354) {
+              var dOne = qSVG.gap(vertex[ss], vertex[vertex[ss].child[fr + 1].id]);
+              var dTwo = qSVG.gap(vertex[ss], vertex[vertex[ss].child[fr].id]);
+              if (dOne > dTwo) {
+                toClean.push(fr + 1);
+              } else {
+                toClean.push(fr);
               }
             }
           }
-        }
-        toClean.sort(function(a, b) {
-            return b-a;
-          });
-        toClean.push(-1);
-        for (var cc = 0; cc < toClean.length-1; cc++) {
-          if (toClean[cc] > toClean[(cc+1)]) {
-            vertex[ss].removed.push(vertex[ss].child[toClean[cc]].id);
-            vertex[ss].child.splice(toClean[cc], 1);
+
+          // Remove duplicates from toClean and sort descending
+          var seen = {};
+          var uniqueClean = [];
+          for (var tc = 0; tc < toClean.length; tc++) {
+            if (!seen[toClean[tc]]) {
+              seen[toClean[tc]] = true;
+              uniqueClean.push(toClean[tc]);
+            }
+          }
+          uniqueClean.sort(function(a, b) { return b - a; });
+
+          // Remove in reverse order to preserve indices
+          for (var cc = 0; cc < uniqueClean.length; cc++) {
+            vertex[ss].removed.push(vertex[ss].child[uniqueClean[cc]].id);
+            vertex[ss].child.splice(uniqueClean[cc], 1);
           }
         }
       }
@@ -564,27 +590,24 @@ var qSVG = {
     //* @app = add function pop() or shift() to @arr1, arr2 *
     //* False if arr1.length != arr2.length                 *
     //* False if value into arr1[] != arr2[] - no order     *
+    //* Optimized: O(n²) -> O(n) using Set                  *
     //* *****************************************************
     arrayCompare: function(arr1, arr2, app) {
-      // if (arr1.length != arr2.length) return false;
-      var minus = 0;
-      var start = 0;
-      if (app == 'pop') {
-        minus = 1;
+      var start = (app === 'shift') ? 1 : 0;
+      var end1 = (app === 'pop') ? arr1.length - 1 : arr1.length;
+      var end2 = (app === 'pop') ? arr2.length - 1 : arr2.length;
+
+      // Build Set from arr2 for O(1) lookup
+      var set2 = {};
+      for (var j = start; j < end2; j++) {
+        set2[arr2[j]] = true;
       }
-      if (app == 'shift') {
-        start = 1;
+
+      // Check all elements of arr1 exist in set2
+      for (var i = start; i < end1; i++) {
+        if (!set2[arr1[i]]) return false;
       }
-      var coordCounter = arr1.length - minus - start;
-      for (var iFirst = start; iFirst < arr1.length-minus; iFirst++) {
-        for (var iSecond = start; iSecond < arr2.length-minus; iSecond++) {
-          if (arr1[iFirst] == arr2[iSecond]) {
-            coordCounter--;
-          }
-        }
-      }
-      if (coordCounter == 0) return true;
-      else return false;
+      return true;
     },
 
     vectorVertex: function(vex1, vex2, vex3) {
@@ -599,7 +622,8 @@ var qSVG = {
     },
 
     segmentTree: function(VERTEX_NUMBER, vertex) {
-      var TREELIST = [VERTEX_NUMBER];
+      // Optimized: use arrays instead of strings to avoid split/concat overhead
+      var TREELIST = [[VERTEX_NUMBER]];
       WAY = [];
       var COUNT = vertex.length;
       var ORIGIN = VERTEX_NUMBER;
@@ -610,45 +634,41 @@ var qSVG = {
         if (TREELIST.length == 0) return;
         var TREETEMP = [];
         COUNT--;
-        for (var k = 0;k < TREELIST.length; k++) {
+        for (var k = 0; k < TREELIST.length; k++) {
           var found = true;
-          var WRO = TREELIST[k];
-          var WRO_ARRAY = WRO.toString().split('-');
+          var WRO_ARRAY = TREELIST[k];  // Already an array
           var WR = WRO_ARRAY[WRO_ARRAY.length - 1];
 
           for (var v = 0; v < vertex[WR].child.length; v++) {
-            if (vertex[WR].child[v].id == ORIGIN && COUNT < (vertex.length - 1) && WRO_ARRAY.length > 2) { // WAYS HYPER
-                WAY.push(WRO+"-"+ORIGIN); // WAYS
+            if (vertex[WR].child[v].id == ORIGIN && COUNT < (vertex.length - 1) && WRO_ARRAY.length > 2) {
+                WAY.push(WRO_ARRAY.concat(ORIGIN));  // Return array instead of string
                 found = false;
                 break;
             }
           }
           if (found) {
-              var bestToAdd;
-              var bestDet = 0;
               var nextVertex = -1;
-              // var nextVertexValue = 360;
               var nextDeterValue = Infinity;
               var nextDeterVal = 0;
               var nextFlag = 0;
               if (vertex[WR].child.length == 1) {
                 if (WR == ORIGIN && COUNT == (vertex.length - 1)) {
-                  TREETEMP.push(WRO+'-'+vertex[WR].child[0].id);
+                  TREETEMP.push(WRO_ARRAY.concat(vertex[WR].child[0].id));
                 }
-                if (WR != ORIGIN  && COUNT < (vertex.length - 1)) {
-                  TREETEMP.push(WRO+'-'+vertex[WR].child[0].id);
+                if (WR != ORIGIN && COUNT < (vertex.length - 1)) {
+                  TREETEMP.push(WRO_ARRAY.concat(vertex[WR].child[0].id));
                 }
               }
               else {
                 for (var v = 0; v < vertex[WR].child.length && vertex[WR].child.length > 0; v++) {
-                      if (WR == ORIGIN && COUNT == (vertex.length - 1)) { // TO INIT FUNCTION -> // CLOCKWISE Research
+                      if (WR == ORIGIN && COUNT == (vertex.length - 1)) {
                         var vDet = qSVG.vectorVertex({x: 0, y: -1}, vertex[WR], vertex[vertex[WR].child[v].id]);
-                        if (vDet >= nextDeterVal ) {
+                        if (vDet >= nextDeterVal) {
                           nextFlag = 1;
                           nextDeterVal = vDet;
                           nextVertex = vertex[WR].child[v].id;
                         }
-                        if (Math.sign(vDet) == -1  && nextFlag == 0) {
+                        if (Math.sign(vDet) == -1 && nextFlag == 0) {
                           if (vDet < nextDeterValue && Math.sign(nextDeterValue) > -1) {
                             nextDeterValue = vDet;
                             nextVertex = vertex[WR].child[v].id;
@@ -659,9 +679,9 @@ var qSVG = {
                           }
                         }
                       }
-                      if (WR != ORIGIN  && WRO_ARRAY[WRO_ARRAY.length-2] != vertex[WR].child[v].id && COUNT < (vertex.length - 1)) { // COUNTERCLOCKWISE Research
-                        var vDet = qSVG.vectorVertex(vertex[WRO_ARRAY[WRO_ARRAY.length-2]], vertex[WR], vertex[vertex[WR].child[v].id]);
-                        if (vDet < nextDeterValue  && nextFlag == 0) {
+                      if (WR != ORIGIN && WRO_ARRAY[WRO_ARRAY.length - 2] != vertex[WR].child[v].id && COUNT < (vertex.length - 1)) {
+                        var vDet = qSVG.vectorVertex(vertex[WRO_ARRAY[WRO_ARRAY.length - 2]], vertex[WR], vertex[vertex[WR].child[v].id]);
+                        if (vDet < nextDeterValue && nextFlag == 0) {
                           nextDeterValue = vDet;
                           nextVertex = vertex[WR].child[v].id;
                         }
@@ -674,7 +694,7 @@ var qSVG = {
                         }
                       }
                 }
-                if (nextVertex != -1) TREETEMP.push(WRO+'-'+nextVertex);
+                if (nextVertex != -1) TREETEMP.push(WRO_ARRAY.concat(nextVertex));
               }
           }
         }
@@ -683,33 +703,60 @@ var qSVG = {
     },
 
     polygonize: function(segment) {
+       console.time('         [polygonize] junctionList');
        junction = qSVG.junctionList(segment);
-       vertex = qSVG.vertexList(junction, segment);
-        var vertexCopy = qSVG.vertexList(junction, segment);
+       console.timeEnd('         [polygonize] junctionList');
+       console.log('            Junctions:', junction.length);
 
-      var edgesChild = [];
+       console.time('         [polygonize] vertexList');
+       vertex = qSVG.vertexList(junction, segment);
+       console.timeEnd('         [polygonize] vertexList');
+       console.log('            Vertices:', vertex.length);
+       // Removed duplicate vertexList call (was unused vertexCopy)
+
+      // Count total edges as iteration limit (safety bound)
+      var totalEdges = 0;
       for (var j = 0; j < vertex.length; j++) {
-        for (var vv = 0; vv < vertex[j].child.length; vv++) {
-          edgesChild.push([j, vertex[j].child[vv].id]);
+        totalEdges += vertex[j].child.length;
+      }
+
+      // Build reverse index ONCE before the loop (optimization: avoid rebuilding each iteration)
+      var childToParents = {};
+      for (var vi = 0; vi < vertex.length; vi++) {
+        for (var ci = 0; ci < vertex[vi].child.length; ci++) {
+          var childId = vertex[vi].child[ci].id;
+          if (!childToParents[childId]) childToParents[childId] = [];
+          childToParents[childId].push(vi);
         }
       }
+
       var polygons = [];
       var WAYS;
-      for (var jc = 0; jc < edgesChild.length; jc++) {
-          var bestVertex = 0;
+
+      // Use while loop with edge count as safety limit instead of iterating unused jc
+      var iterations = 0;
+      var maxIterations = totalEdges + 1;
+
+      console.time('         [polygonize] main loop');
+      while (iterations < maxIterations) {
+          iterations++;
+
+          // Find best vertex (leftmost, then lowest y)
+          var bestVertex = -1;
           var bestVertexValue = Infinity;
           for (var j = 0; j < vertex.length; j++) {
-            if (vertex[j].x < bestVertexValue && vertex[j].child.length > 1 && vertex[j].bypass == 0) {
-              bestVertexValue = vertex[j].x;
-              bestVertex = j;
-            }
-            if (vertex[j].x == bestVertexValue && vertex[j].child.length > 1 && vertex[j].bypass == 0) {
-              if (vertex[j].y > vertex[bestVertex].y) {
+            if (vertex[j].child.length > 1 && vertex[j].bypass == 0) {
+              if (vertex[j].x < bestVertexValue) {
                 bestVertexValue = vertex[j].x;
+                bestVertex = j;
+              } else if (vertex[j].x == bestVertexValue && bestVertex >= 0 && vertex[j].y > vertex[bestVertex].y) {
                 bestVertex = j;
               }
             }
           }
+
+          // No valid vertex found - we're done
+          if (bestVertex === -1) break;
 
           // console.log("%c%s", "background: yellow; font-size: 14px;","RESEARCH WAY FOR STARTING VERTEX "+bestVertex);
           WAYS = qSVG.segmentTree(bestVertex, vertex);
@@ -717,7 +764,7 @@ var qSVG = {
             vertex[bestVertex].bypass = 1;
           }
           if (WAYS.length > 0) {
-            var tempSurface = WAYS[0].split('-');
+            var tempSurface = WAYS[0];  // Already an array, no split needed
             var lengthRoom = qSVG.areaRoom(vertex, tempSurface);
             var bestArea = parseInt(lengthRoom);
               var found = true;
@@ -761,37 +808,72 @@ var qSVG = {
                     vertex[tempSurface[1]].child.splice(aa, 1);
                   }
                 }
-                //REMOVE FILAMENTS ?????
+                //REMOVE FILAMENTS - optimized O(n) using pre-built childToParents index
 
-                do {
-                  var looping = 0;
-                  for (var aa = 0; aa < vertex.length; aa++) {
-                    if (vertex[aa].child.length == 1) {
-                      looping = 1;
-                      vertex[aa].child = [];
-                      for (var ab = 0; ab < vertex.length; ab++) { // OR MAKE ONLY ON THE WAY tempSurface ?? BETTER ??
-                        for (var ac = 0; ac < vertex[ab].child.length; ac++) {
-                          if (vertex[ab].child[ac].id == aa) {
-                            vertex[ab].child.splice(ac, 1);
-                          }
-                        }
+                // Queue vertices with exactly 1 child (use index instead of shift() which is O(n))
+                var filamentQueue = [];
+                for (var vi = 0; vi < vertex.length; vi++) {
+                  if (vertex[vi].child.length === 1) filamentQueue.push(vi);
+                }
+
+                var queueIdx = 0;
+                while (queueIdx < filamentQueue.length) {
+                  var aa = filamentQueue[queueIdx++];  // O(1) instead of shift() O(n)
+                  if (vertex[aa].child.length !== 1) continue; // Already processed
+
+                  vertex[aa].child = [];
+
+                  // Remove aa from all parents' children (using pre-built index)
+                  var parents = childToParents[aa] || [];
+                  for (var pi = 0; pi < parents.length; pi++) {
+                    var ab = parents[pi];
+                    for (var ac = vertex[ab].child.length - 1; ac >= 0; ac--) {
+                      if (vertex[ab].child[ac].id === aa) {
+                        vertex[ab].child.splice(ac, 1);
+                        // If parent now has 1 child, add to queue
+                        if (vertex[ab].child.length === 1) filamentQueue.push(ab);
                       }
                     }
                   }
                 }
-                while (looping == 1);
               }
           }
         }
+        console.timeEnd('         [polygonize] main loop');
+        console.log('            Iterations:', iterations, 'Polygons:', polygons.length);
+
+        console.time('         [polygonize] SUB AREA check');
         //SUB AREA(s) ON POLYGON CONTAINS OTHERS FREE POLYGONS (polygon without commonSideEdge)
+        // Optimization: pre-compute bounding boxes for early rejection
+        var bboxes = [];
+        for (var bi = 0; bi < polygons.length; bi++) {
+          var coords = polygons[bi].coords;
+          var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (var ci = 0; ci < coords.length; ci++) {
+            if (coords[ci].x < minX) minX = coords[ci].x;
+            if (coords[ci].y < minY) minY = coords[ci].y;
+            if (coords[ci].x > maxX) maxX = coords[ci].x;
+            if (coords[ci].y > maxY) maxY = coords[ci].y;
+          }
+          bboxes.push({ minX: minX, minY: minY, maxX: maxX, maxY: maxY });
+        }
+
         for (var pp = 0; pp < polygons.length; pp++) {
           var inside = [];
+          var ppBox = bboxes[pp];
           for (var free = 0; free < polygons.length; free++) {
             if (pp != free) {
+              // Early rejection: check if bounding box of 'free' is inside 'pp'
+              var freeBox = bboxes[free];
+              if (freeBox.minX < ppBox.minX || freeBox.maxX > ppBox.maxX ||
+                  freeBox.minY < ppBox.minY || freeBox.maxY > ppBox.maxY) {
+                continue; // Bounding box doesn't fit, skip expensive rayCasting
+              }
+
               var polygonFree = polygons[free].coords;
               var countCoords = polygonFree.length;
               var found = true;
-              for (pf = 0; pf < countCoords; pf++) {
+              for (var pf = 0; pf < countCoords; pf++) {
                 found = qSVG.rayCasting(polygonFree[pf], polygons[pp].coords);
                 if (!found) {
                   break;
@@ -805,6 +887,7 @@ var qSVG = {
           }
           polygons[pp].inside = inside;
         }
+        console.timeEnd('         [polygonize] SUB AREA check');
       return {polygons : polygons, vertex : vertex};
     },
 
