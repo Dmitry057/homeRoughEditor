@@ -71,6 +71,10 @@ GraphKMeansBehaviour.prototype.generate = function (numNodes, kMeans) {
   console.timeEnd('4️⃣ Area estimator (rectangles + union)');
   console.log('   Segments:', segments ? segments.length : 0);
 
+  // console.time('4.5️⃣ Render intersections (green)');
+  // this.areaEstimator.renderIntersections();
+  // console.timeEnd('4.5️⃣ Render intersections (green)');
+
   console.time('5️⃣ Wall spawner (build walls)');
   var spawned = this.wallSpawner.buildFromSegments(segments);
   this.builtWalls = spawned.walls;

@@ -8,6 +8,8 @@ function AreaEstimator(config) {
   this.config = config || {};
   this.groupId = 'graph-rects';
   this.unionId = 'graph-rect-union';
+  this.intersectionsId = 'graph-rect-intersections';
+  this.rects = [];  // Store rects for intersection rendering
 }
 
 AreaEstimator.prototype.render = function (nodes, edges) {
@@ -43,6 +45,8 @@ AreaEstimator.prototype.render = function (nodes, edges) {
     rects.push(rect);
   }
 
+  this.rects = rects;  // Store for renderIntersections
+
   for (var r = 0; r < rects.length; r++) {
     var rc = rects[r];
     qSVG.create(this.groupId, 'rect', {
@@ -64,6 +68,9 @@ AreaEstimator.prototype.clear = function () {
   if (existing && existing.length) existing.remove();
   var union = $('#' + this.unionId);
   if (union && union.length) union.remove();
+  var intersections = $('#' + this.intersectionsId);
+  if (intersections && intersections.length) intersections.remove();
+  this.rects = [];
 };
 
 AreaEstimator.prototype._renderUnion = function (rects) {
@@ -176,6 +183,69 @@ AreaEstimator.prototype._renderUnion = function (rects) {
   }
 
   return mergedSegments;
+};
+
+/**
+ * Renders ALL pairwise rectangle intersection LINES in green.
+ * Only draws the boundary lines, not filled areas.
+ */
+AreaEstimator.prototype.renderIntersections = function () {
+  // Clear previous intersections
+  var existing = $('#' + this.intersectionsId);
+  if (existing && existing.length) existing.remove();
+
+  if (!this.rects || this.rects.length < 2) return [];
+
+  qSVG.create(this.config.layerId, 'g', { id: this.intersectionsId });
+
+  var intersections = [];
+  var strokeColor = '#00cc00';  // Green
+  var strokeWidth = 2;
+
+  // Calculate all pairwise intersections
+  for (var i = 0; i < this.rects.length; i++) {
+    for (var j = i + 1; j < this.rects.length; j++) {
+      var r1 = this.rects[i];
+      var r2 = this.rects[j];
+
+      // Calculate intersection
+      var ix1 = Math.max(r1.x1, r2.x1);
+      var iy1 = Math.max(r1.y1, r2.y1);
+      var ix2 = Math.min(r1.x2, r2.x2);
+      var iy2 = Math.min(r1.y2, r2.y2);
+
+      // Check if intersection exists (positive area)
+      if (ix1 < ix2 && iy1 < iy2) {
+        var intersection = { x1: ix1, y1: iy1, x2: ix2, y2: iy2, from: i, to: j };
+        intersections.push(intersection);
+
+        // Draw 4 lines for intersection boundary (top, bottom, left, right)
+        // Top line
+        qSVG.create(this.intersectionsId, 'line', {
+          x1: ix1, y1: iy1, x2: ix2, y2: iy1,
+          stroke: strokeColor, 'stroke-width': strokeWidth, 'pointer-events': 'none'
+        });
+        // Bottom line
+        qSVG.create(this.intersectionsId, 'line', {
+          x1: ix1, y1: iy2, x2: ix2, y2: iy2,
+          stroke: strokeColor, 'stroke-width': strokeWidth, 'pointer-events': 'none'
+        });
+        // Left line
+        qSVG.create(this.intersectionsId, 'line', {
+          x1: ix1, y1: iy1, x2: ix1, y2: iy2,
+          stroke: strokeColor, 'stroke-width': strokeWidth, 'pointer-events': 'none'
+        });
+        // Right line
+        qSVG.create(this.intersectionsId, 'line', {
+          x1: ix2, y1: iy1, x2: ix2, y2: iy2,
+          stroke: strokeColor, 'stroke-width': strokeWidth, 'pointer-events': 'none'
+        });
+      }
+    }
+  }
+
+  console.log('Intersections found:', intersections.length);
+  return intersections;
 };
 
 AreaEstimator.prototype._neighborsFor = function (id, nodes, edges) {
