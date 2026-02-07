@@ -37,10 +37,17 @@ function GraphKMeansBehaviour(options) {
   this.builtWalls = [];
   this.builtPawns = [];
 
+  this.interiorThickness = options.interiorThickness || 10;
+  this.doorWidth = options.doorWidth || 66;
+  this.targetRoomRatio = options.targetRoomRatio || 3;
+  this.mergeRay = options.mergeRay !== undefined ? options.mergeRay : 8;
+  this.mergeProb = options.mergeProb !== undefined ? options.mergeProb : 0.5;
+
   this.generator = new GraphGenerator(this.config);
   this.areaEstimator = new AreaEstimator(this.config);
   this.wallSpawner = new WallSpawner({ wallThickness: this.wallThickness });
   this.graph = new Graph({ layerId: this.config.layerId, nodeRadius: this.config.nodeRadius });
+  this.interiorGenerator = null; // Lazy init (ES module loads async)
 }
 
 GraphKMeansBehaviour.prototype.generate = function (numNodes, kMeans) {
@@ -82,6 +89,27 @@ GraphKMeansBehaviour.prototype.generate = function (numNodes, kMeans) {
   console.timeEnd('5️⃣ Wall spawner (build walls)');
   console.log('   Walls:', this.builtWalls.length);
 
+  // Step 6: Interior walls (Voronoi → rooms → walls with doors)
+  console.time('6️⃣ Interior walls');
+  if (!this.interiorGenerator && typeof window.InteriorGenerator === 'function') {
+    this.interiorGenerator = new window.InteriorGenerator({
+      interiorThickness: this.interiorThickness,
+      doorWidth: this.doorWidth,
+      targetRoomRatio: this.targetRoomRatio,
+      mergeRay: this.mergeRay,
+      mergeProb: this.mergeProb
+    });
+  }
+  if (this.interiorGenerator) {
+    var interior = this.interiorGenerator.generate(this.nodes, this.edges, segments);
+    this.interiorWalls = interior.walls;
+    this.interiorRooms = interior.rooms;
+    console.log('   Interior rooms:', interior.rooms.length, 'walls:', interior.walls.length);
+  } else {
+    console.warn('   InteriorGenerator not loaded yet (ES module may still be loading)');
+  }
+  console.timeEnd('6️⃣ Interior walls');
+
   console.timeEnd('🔷 TOTAL pipeline');
   console.log('%c=== Pipeline End ===', 'background: #222; color: #bada55; font-size: 14px;');
 
@@ -93,6 +121,11 @@ GraphKMeansBehaviour.prototype.generate = function (numNodes, kMeans) {
 };
 
 GraphKMeansBehaviour.prototype.clear = function () {
+  if (this.interiorGenerator) {
+    this.interiorGenerator.clear();
+  }
+  this.interiorWalls = [];
+  this.interiorRooms = [];
   this.wallSpawner.clearWalls(this.builtWalls);
   this.builtWalls = [];
   this.builtPawns = [];

@@ -13,6 +13,15 @@
     crossorigin="anonymous" referrerpolicy="no-referrer" />
   <!-- <link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet"> -->
   <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "d3-delaunay": "./node_modules/d3-delaunay/src/index.js",
+      "delaunator": "./node_modules/delaunator/index.js",
+      "robust-predicates": "./node_modules/robust-predicates/index.js"
+    }
+  }
+  </script>
 </head>
 
 <body style="background:#f2eee5;margin:0;padding:0; ">
@@ -397,7 +406,7 @@
         <input type="number" id="genNodeCount" value="60" min="2" max="200" step="1"
           style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
         <p style="font-size:0.85em;margin-bottom:5px">k (means):</p>
-        <input type="number" id="genKMeans" value="1" min="1" max="12" step="1"
+        <input type="number" id="genKMeans" value="3" min="1" max="12" step="1"
           style="width:100%;padding:5px;margin-bottom:10px;border:1px solid #ccc;border-radius:4px" />
         <p style="font-size:0.85em;margin-bottom:5px">Intersection Density:</p>
         <input type="number" id="genIntersectionDensity" value="2" min="1" max="10" step="1"
@@ -411,6 +420,18 @@
             Show graph & outlines
           </label>
         </div>
+        <div class="form-check" style="margin-bottom:10px">
+          <input class="form-check-input" type="checkbox" id="genShowVoronoi">
+          <label class="form-check-label" for="genShowVoronoi" style="font-size:0.85em">
+            Show Voronoi cells
+          </label>
+        </div>
+        <p style="font-size:0.85em;margin-bottom:5px">Merge reach (px): <span id="genMergeRayVal">8</span></p>
+        <input type="range" id="genMergeRay" min="2" max="80" step="1" value="8"
+          style="width:100%;margin-bottom:10px" />
+        <p style="font-size:0.85em;margin-bottom:5px">Merge probability: <span id="genMergeProbVal">0.50</span></p>
+        <input type="range" id="genMergeProb" min="0" max="1" step="0.05" value="0.5"
+          style="width:100%;margin-bottom:10px" />
         <p style="font-size:0.75em;color:#666;margin-bottom:10px">
           Points are spawned with noise near center; each node links to its k nearest neighbors.
         </p>
@@ -681,6 +702,7 @@
 <script src="graph/areaEstimator.js"></script>
 <script src="graph/wallSpawner.js"></script>
 <script src="GraphKMeansBehaviour.js"></script>
+<script type="module" src="interior/interiorGenerator.js"></script>
 <script src="core/history.js"></script>
 <script src="func.js"></script>
 <script src="engine.js"></script>

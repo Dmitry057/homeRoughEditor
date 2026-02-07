@@ -1735,6 +1735,8 @@ $('#btnGenerate').click(function () {
     var minOverlap = parseInt($('#genIntersectionDensity').val()) || 1;
     var wallThickness = parseInt($('#genWallThickness').val()) || 20;
     var showOverlay = $('#genShowOverlay').is(':checked');
+    var mergeRay = parseFloat($('#genMergeRay').val()) || 8;
+    var mergeProb = parseFloat($('#genMergeProb').val()) || 0.5;
 
     // Clear previous generation if exists
     if (currentGenerator) {
@@ -1752,13 +1754,23 @@ $('#btnGenerate').click(function () {
         rectMinOverlap: minOverlap,
         wallThickness: wallThickness,
         spawnOffsetX: 220,
-        spawnOffsetY: 0
+        spawnOffsetY: 0,
+        mergeRay: mergeRay,
+        mergeProb: mergeProb
     });
 
     $('#boxinfo').html('Generating star graph...');
 
+    var showVoronoi = $('#genShowVoronoi').is(':checked');
+
     var result = currentGenerator.generate(nodeCount, kMeans);
     setOverlayVisibility(showOverlay);
+
+    // Toggle Voronoi debug visualization
+    if (currentGenerator.interiorGenerator) {
+        currentGenerator.interiorGenerator.setShowVoronoi(showVoronoi);
+    }
+
     $('#boxinfo').html('Graph: ' + result.nodes.length + ' nodes, ' + result.edges.length + ' edges (k=' + result.kMeans + ', dens=' + minOverlap + ', t=' + wallThickness + ')');
 });
 
@@ -1767,9 +1779,23 @@ function setOverlayVisibility(show) {
     $('#graph-layer, #graph-rects, #graph-rect-union').attr('display', disp);
 }
 
-// Toggle handler
+// Toggle handlers
 $(document).on('change', '#genShowOverlay', function () {
     setOverlayVisibility(this.checked);
+});
+
+$(document).on('change', '#genShowVoronoi', function () {
+    if (currentGenerator && currentGenerator.interiorGenerator) {
+        currentGenerator.interiorGenerator.setShowVoronoi(this.checked);
+    }
+});
+
+$(document).on('input', '#genMergeRay', function () {
+    $('#genMergeRayVal').text(parseInt(this.value, 10));
+});
+
+$(document).on('input', '#genMergeProb', function () {
+    $('#genMergeProbVal').text(parseFloat(this.value).toFixed(2));
 });
 
 $('#grid_mode').click(function () {
